@@ -1,0 +1,74 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Extension (No Debug)",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}/packages/extension"
+            ],
+            "preLaunchTask": "build",
+            "sourceMaps": true,
+            "outFiles": [
+                "${workspaceFolder}/packages/language/out/**/*.js",
+                "${workspaceFolder}/packages/extension/out/**/*.js"
+            ]
+        },
+        {
+            "name": "Run Extension (Debug Mode)",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}/packages/extension"
+            ],
+            "env": {
+                "DEBUG_BREAK": "1"
+            },
+            "preLaunchTask": "build",
+            "sourceMaps": true,
+            "outFiles": [
+                "${workspaceFolder}/packages/language/out/**/*.js",
+                "${workspaceFolder}/packages/extension/out/**/*.js"
+            ]
+        },
+        {
+            "name": "Attach to Language Server",
+            "type": "node",
+            "port": 6009,
+            "request": "attach",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "sourceMaps": true,
+            "outFiles": [
+                "${workspaceFolder}/packages/language/out/**/*.js",
+                "${workspaceFolder}/packages/extension/out/**/*.js"
+            ]
+        },
+        {
+            "name": "Debug Generator",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/packages/cli/bin/cli.js",
+            "args": [
+                "generate",
+                "${workspaceFolder}/demos/Demo1/Demo1.sysla"
+            ],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "build",
+            "sourceMaps": true,
+            "outFiles": [
+                "${workspaceFolder}/packages/cli/out/**/*.js",
+                "${workspaceFolder}/packages/language/out/**/*.js"
+            ],
+            "console": "integratedTerminal"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Run Extension + Attach to Server",
+            "configurations": ["Run Extension (Debug Mode)", "Attach to Language Server"]
+        }
+    ]
+}

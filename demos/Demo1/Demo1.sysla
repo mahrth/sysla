@@ -1,0 +1,33 @@
+Signal S1
+Signal S2
+Signal S3
+
+Component Supersystem
+Part A as a
+Part B as b
+Part C as c
+Connection a:PA - b:PB1
+Connection b:PB2 - c:PC
+
+Component A
+Port PA Output S1
+
+Component B
+Port PB1 Input S1
+Port PB2 Output S2
+Part D as d
+Part E as e
+Delegation PB1 - d:PD1  
+Delegation PB2 - e:PE2
+Connection d:PD2 - e:PE1 
+
+Component C
+Port PC Input S2
+
+Component D
+Port PD1 Input S1
+Port PD2 Output S3
+
+Component E
+Port PE1 Input S3
+Port PE2 Output S2

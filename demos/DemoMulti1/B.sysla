@@ -1,0 +1,8 @@
+Component B
+Port PB1 Input S1
+Port PB2 Output S2
+Part D as d
+Part E as e
+Delegation PB1 - d:PD1  
+Delegation PB2 - e:PE2
+Connection d:PD2 - e:PE1 

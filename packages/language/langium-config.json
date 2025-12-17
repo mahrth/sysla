@@ -1,0 +1,16 @@
+{
+    "projectName": "Sysla",
+    "languages": [
+        {
+            "id": "sysla",
+            "grammar": "src/sysla.langium",
+            "fileExtensions": [
+                "sysla"
+            ],
+            "textMate": {
+                "out": "syntaxes/sysla.tmLanguage.json"
+            }
+        }
+    ],
+    "out": "src/generated"
+}

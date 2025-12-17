@@ -1,0 +1,30 @@
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
+node_modules/
+dist/
+out/
+**/src/generated
+syntaxes/
+*.tsbuildinfo
+*.vsix
+
+# CLI-generated files
+generated/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Other IDEs
+.idea/
+*.swp
+*.swo
+*~
