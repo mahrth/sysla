@@ -1,0 +1,60 @@
+Signal UserCommand
+Signal Data
+Signal GraphicsCommand
+Signal VoltageLevel
+Signal VideoSignal  
+ 
+Component Supersystem        
+Part Computer as computer 
+Part User as user    
+Part Monitor as monitor  
+Part NAS as nas1   
+Part NAS as nas2  
+Connection computer:HDMI - monitor:HDMI       
+Connection user:Hand - computer:Switch 
+Connection nas1:RJ45 - computer:RJ45_1     
+Connection nas2:RJ45 - computer:RJ45_2 
+    
+Component User      
+Port Hand Output UserCommand
+   
+Component Monitor                
+Port HDMI Input VideoSignal 
+  
+Component NAS  
+Port RJ45 [Port Ethernet] Bidirectional Data
+
+Component Computer 
+Port HDMI Output VideoSignal  
+Port RJ45_1 [Port Ethernet] Bidirectional Data
+Port RJ45_2 [Port Ethernet] Bidirectional Data
+Port Switch Input UserCommand 
+Part GraphicsCard as graphicsCard
+Part Case as case
+Part Motherboard as motherboard
+Delegation HDMI - graphicsCard:HDMI
+Delegation Switch - case:Switch
+Delegation RJ45_1 - motherboard:RJ45_1
+Delegation RJ45_2 - motherboard:RJ45_2
+Connection graphicsCard:PcieConnector - motherboard:PcieSlot
+Connection case:PowerSwitch - motherboard:PowerSocket
+Connection graphicsCard:Screw - case:GraphicsCardScrew
+Connection case:CaseScrews - motherboard:MountingHoles
+
+Component GraphicsCard
+Port HDMI Output VideoSignal
+Port PcieConnector Input GraphicsCommand
+Port Screw
+
+Component Case
+Port Switch Input UserCommand
+Port PowerSwitch Output VoltageLevel
+Port CaseScrews
+Port GraphicsCardScrew 
+
+Component Motherboard  
+Port PcieSlot Output GraphicsCommand
+Port PowerSocket Input VoltageLevel
+Port RJ45_1 [Port Ethernet] Bidirectional Data
+Port RJ45_2 [Port Ethernet] Bidirectional Data
+Port MountingHoles
