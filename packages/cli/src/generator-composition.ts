@@ -1,5 +1,5 @@
 import type { Model, Component, PartComponent } from 'sysla-language';
-import { GraphVizGeneratorBase, COLOR_COMPONENT, COLOR_SIGNAL, GraphGenerator } from './graphviz-generator.js';
+import { GraphVizGeneratorBase, COLOR_COMPONENT, GraphGenerator } from './graphviz-generator.js';
 import { Anchor, InternalConnection } from './generator-helpers.js';
 
 export class GeneratorComposition extends GraphVizGeneratorBase implements GraphGenerator {
@@ -68,28 +68,7 @@ export class GeneratorComposition extends GraphVizGeneratorBase implements Graph
         output += this.compilePartPort(hash1, connection.anchor1);
         output += this.compilePartPort(hash2, connection.anchor2);
         
-        const hashPort1 = this.getPortNodeId(connection.anchor1.partPort, connection.anchor1.partComponent);
-        const hashPort2 = this.getPortNodeId(connection.anchor2.partPort, connection.anchor2.partComponent);
-        
-        // Signal node (if available)
-        if (connection.anchor1.partPort.signal?.ref) {
-            // Use the signal object directly as a key
-            const hash3 = this.getNodeId(connection.anchor1.partPort.signal.ref);
-            const name3 = connection.anchor1.partPort.signal.ref.name;
-            const type3 = 'Signal';
-            
-            output += `    node [shape=box, fillcolor=${COLOR_SIGNAL}, style=filled, label = ${this.createLabel(name3, type3)}]; ${hash3};\n`;
-            
-            // Connections to signal with direction
-            const dir1 = this.getPortDirection(connection.anchor1.partPort);
-            const dir2 = this.getPortDirection(connection.anchor2.partPort);
-            
-            output += `    ${hashPort1} -> ${hash3} ${dir1};\n`;
-            output += `    ${hashPort2} -> ${hash3} ${dir2};\n`;
-        } else {
-            // Direct connection without a signal
-            output += `    ${hashPort1} -> ${hashPort2} [dir=none];\n`;
-        }
+        output += this.renderConnection(connection);
         
         return output;
     }
@@ -98,7 +77,8 @@ export class GeneratorComposition extends GraphVizGeneratorBase implements Graph
         const port = anchor.partPort;
         const portNode = this.renderPortNode(port, {
             instance: anchor.partComponent,
-            showSignal: false
+            showSignal: false,
+            showSignalType: true
         });
         const portNodeId = this.getPortNodeId(port, anchor.partComponent);
         

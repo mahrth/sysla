@@ -5,30 +5,9 @@ import * as fs from 'node:fs';
 import { URI } from 'langium';
 
 export async function extractDocument(fileName: string, services: LangiumCoreServices): Promise<LangiumDocument> {
-    const extensions = services.LanguageMetaData.fileExtensions;
-    if (!extensions.includes(path.extname(fileName))) {
-        console.error(chalk.yellow(`Please choose a file with one of these extensions: ${extensions}.`));
-        process.exit(1);
-    }
-
-    if (!fs.existsSync(fileName)) {
-        console.error(chalk.red(`File ${fileName} does not exist.`));
-        process.exit(1);
-    }
-
-    const document = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(URI.file(path.resolve(fileName)));
+    const document = await loadDocument(fileName, services);
     await services.shared.workspace.DocumentBuilder.build([document], { validation: true });
-
-    const validationErrors = (document.diagnostics ?? []).filter(e => e.severity === 1);
-    if (validationErrors.length > 0) {
-        console.error(chalk.red('There are validation errors:'));
-        for (const validationError of validationErrors) {
-            console.error(chalk.red(
-                `line ${validationError.range.start.line + 1}: ${validationError.message} [${document.textDocument.getText(validationError.range)}]`
-            ));
-        }
-        process.exit(1);
-    }
+    exitOnValidationErrors([document]);
 
     return document;
 }
@@ -45,13 +24,15 @@ export async function extractAstNodeWithDirectory<T extends AstNode>(
     fileName: string,
     services: LangiumCoreServices
 ): Promise<T> {
+    // Check the selected file before looking for companion files.
+    const mainDocument = await loadDocument(fileName, services);
     const dir = path.dirname(fileName);
     const mainFileName = path.basename(fileName);
     
     // Find all .sysla files in the directory
-    const allSyslaFiles = fs.readdirSync(dir)
-        .filter(f => f.endsWith('.sysla'))
-        .map(f => path.join(dir, f));
+    const allSyslaFiles = fs.readdirSync(dir, { withFileTypes: true })
+        .filter(entry => (entry.isFile() || entry.isSymbolicLink()) && entry.name.endsWith('.sysla'))
+        .map(entry => path.join(dir, entry.name));
     
     if (allSyslaFiles.length > 1) {
         console.log(chalk.blue(`📁 Loading ${allSyslaFiles.length} .sysla files from ${path.basename(dir)}/`));
@@ -72,17 +53,28 @@ export async function extractAstNodeWithDirectory<T extends AstNode>(
     
     // Build all documents together
     await services.shared.workspace.DocumentBuilder.build(documents, { validation: true });
-    
-    // Return the model of the main file
-    const mainUri = URI.file(path.resolve(fileName));
-    const mainDoc = services.shared.workspace.LangiumDocuments.getDocument(mainUri);
-    
-    if (!mainDoc) {
-        console.error(chalk.red(`Main file not found: ${fileName}`));
-        process.exit(1);
+    exitOnValidationErrors(documents);
+
+    return mainDocument.parseResult.value as T;
+}
+
+function exitOnValidationErrors(documents: LangiumDocument[]): void {
+    const errors = documents.flatMap(document =>
+        (document.diagnostics ?? [])
+            .filter(diagnostic => diagnostic.severity === 1)
+            .map(diagnostic => ({ document, diagnostic }))
+    );
+
+    if (errors.length === 0) return;
+
+    console.error(chalk.red('There are validation errors:'));
+    for (const { document, diagnostic } of errors) {
+        const line = diagnostic.range.start.line + 1;
+        const column = diagnostic.range.start.character + 1;
+        const text = document.textDocument.getText(diagnostic.range);
+        console.error(chalk.red(`${document.uri.fsPath}:${line}:${column}: ${diagnostic.message} [${text}]`));
     }
-    
-    return mainDoc.parseResult.value as T;
+    process.exit(1);
 }
 
 async function loadDocument(fileName: string, services: LangiumCoreServices): Promise<LangiumDocument> {
@@ -94,6 +86,11 @@ async function loadDocument(fileName: string, services: LangiumCoreServices): Pr
 
     if (!fs.existsSync(fileName)) {
         console.error(chalk.red(`File ${fileName} does not exist.`));
+        process.exit(1);
+    }
+
+    if (!fs.statSync(fileName).isFile()) {
+        console.error(chalk.red(`Path ${fileName} is not a file.`));
         process.exit(1);
     }
 

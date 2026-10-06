@@ -1,53 +1,77 @@
-// import { afterEach, beforeAll, describe, expect, test } from "vitest";
-// import { EmptyFileSystem, type LangiumDocument } from "langium";
-// import { expandToString as s } from "langium/generate";
-// import { clearDocuments, parseHelper } from "langium/test";
-// import type { Model } from "sysla-language";
-// import { createSyslaServices, isModel } from "sysla-language";
+import { EmptyFileSystem, URI } from 'langium';
+import { describe, expect, test } from 'vitest';
+import { createSyslaServices, type Model } from 'sysla-language';
+import { parseModel } from './helpers.js';
 
-// let services: ReturnType<typeof createSyslaServices>;
-// let parse:    ReturnType<typeof parseHelper<Model>>;
-// let document: LangiumDocument<Model> | undefined;
+describe('Linking SysLa', () => {
+    test('resolves equally named ports against the correct instance', async () => {
+        const document = await parseModel(`
+            Signal Data
+            Component Source Port P Output Data
+            Component Sink Port P Input Data
+            Component Root
+                Part Source as source
+                Part Sink as sink
+                Connection source:P - sink:P
+        `);
+        expect(document.diagnostics).toHaveLength(0);
+        const [source, sink, root] = document.parseResult.value.components;
+        const connection = root.connections[0];
+        expect(connection.components1.ref).toBe(root.parts[0].instance);
+        expect(connection.components2.ref).toBe(root.parts[1].instance);
+        expect(connection.port1.ref).toBe(source.ports[0].port);
+        expect(connection.port2.ref).toBe(sink.ports[0].port);
+    });
 
-// beforeAll(async () => {
-//     services = createSyslaServices(EmptyFileSystem);
-//     parse = parseHelper<Model>(services.Sysla);
+    test('resolves a delegation against the owner and the inner component', async () => {
+        const document = await parseModel(`
+            Signal Data
+            Component Leaf Port P Input Data
+            Component Root
+                Port P Input Data
+                Part Leaf as leaf
+                Delegation P - leaf:P
+        `);
+        expect(document.diagnostics).toHaveLength(0);
+        const [leaf, root] = document.parseResult.value.components;
+        expect(root.delegations[0].port1.ref).toBe(root.ports[0].port);
+        expect(root.delegations[0].port2.ref).toBe(leaf.ports[0].port);
+    });
 
-//     // activate the following if your linking test requires elements from a built-in library, for example
-//     // await services.shared.workspace.WorkspaceManager.initializeWorkspace([]);
-// });
+    test('links components and signals across documents', async () => {
+        const { shared } = createSyslaServices(EmptyFileSystem);
+        const definitions = shared.workspace.LangiumDocumentFactory.fromString<Model>(
+            'Signal Data\nComponent Leaf\nPort P Input Data', URI.parse('file:///models/Leaf.sysla')
+        );
+        const main = shared.workspace.LangiumDocumentFactory.fromString<Model>(
+            'Component Root\nPort P Input Data\nPart Leaf as leaf\nDelegation P - leaf:P',
+            URI.parse('file:///models/Main.sysla')
+        );
+        const documents = [main, definitions];
+        documents.forEach(document => shared.workspace.LangiumDocuments.addDocument(document));
+        await shared.workspace.DocumentBuilder.build(documents, { validation: true });
+        for (const document of documents) expect(document.diagnostics).toHaveLength(0);
+        const root = main.parseResult.value.components[0];
+        expect(root.parts[0].component.ref).toBe(definitions.parseResult.value.components[0]);
+        expect(root.ports[0].signal?.ref).toBe(definitions.parseResult.value.signals[0]);
+    });
 
-// afterEach(async () => {
-//     document && clearDocuments(services.shared, [ document ]);
-// });
+    test('reports unresolved component references', async () => {
+        const document = await parseModel('Component Root Part Missing as missing');
+        expect(document.diagnostics?.some(diagnostic => diagnostic.severity === 1 && diagnostic.message.includes('Missing'))).toBe(true);
+    });
 
-// describe('Linking tests', () => {
-
-//     test('linking of greetings', async () => {
-//         document = await parse(`
-//             person Langium
-//             Hello Langium!
-//         `);
-
-//         expect(
-//             // here we first check for validity of the parsed document object by means of the reusable function
-//             //  'checkDocumentValid()' to sort out (critical) typos first,
-//             // and then evaluate the cross references we're interested in by checking
-//             //  the referenced AST element as well as for a potential error message;
-//             checkDocumentValid(document)
-//                 || document.parseResult.value.greetings.map(g => g.person.ref?.name || g.person.error?.message).join('\n')
-//         ).toBe(s`
-//             Langium
-//         `);
-//     });
-// });
-
-// function checkDocumentValid(document: LangiumDocument): string | undefined {
-//     return document.parseResult.parserErrors.length && s`
-//         Parser errors:
-//           ${document.parseResult.parserErrors.map(e => e.message).join('\n  ')}
-//     `
-//         || document.parseResult.value === undefined && `ParseResult is 'undefined'.`
-//         || !isModel(document.parseResult.value) && `Root AST object is a ${document.parseResult.value.$type}, expected a 'Model'.`
-//         || undefined;
-// }
+    test('does not resolve a connection against an unrelated component port', async () => {
+        const document = await parseModel(`
+            Component Source Port P
+            Component Other Port Q
+            Component Root
+                Part Source as a
+                Part Source as b
+                Connection a:Q - b:P
+        `);
+        const root = document.parseResult.value.components[2];
+        expect(root.connections[0].port1.ref).toBeUndefined();
+        expect(root.connections[0].port1.error).toBeDefined();
+    });
+});

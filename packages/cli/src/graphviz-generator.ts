@@ -1,4 +1,5 @@
 import type { PartComponent, PartPort, Component, Model } from 'sysla-language';
+import type { InternalConnection } from './generator-helpers.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -102,11 +103,29 @@ export class GraphVizGeneratorBase {
             : this.getNodeId(port);
     }
 
+    protected renderConnection(connection: InternalConnection, indent = '    '): string {
+        const { anchor1, anchor2 } = connection;
+        const portId1 = this.getPortNodeId(anchor1.partPort, anchor1.partComponent);
+        const portId2 = this.getPortNodeId(anchor2.partPort, anchor2.partComponent);
+        const signal = anchor1.partPort.signal?.ref;
+
+        if (!signal) {
+            return `${indent}${portId1} -> ${portId2} [dir=none];\n`;
+        }
+
+        // A signal type may be reused by independent connections.
+        const signalId = this.getNodeId(connection);
+        return `${indent}node [shape=box, fillcolor=${COLOR_SIGNAL}, style=filled, label = ${this.createLabel(signal.name, 'Signal')}]; ${signalId};\n`
+            + `${indent}${portId1} -> ${signalId} ${this.getPortDirection(anchor1.partPort)};\n`
+            + `${indent}${portId2} -> ${signalId} ${this.getPortDirection(anchor2.partPort)};\n`;
+    }
+
     protected renderPortNode(
         port: PartPort,
         options?: {
             instance?: PartComponent;
             showSignal?: boolean;
+            showSignalType?: boolean;
             indent?: string;
         }
     ): string {
@@ -114,7 +133,10 @@ export class GraphVizGeneratorBase {
         const showSignal = options?.showSignal ?? true;
         const portId = this.getPortNodeId(port, options?.instance);
         const name1 = port.port.name;
-        const type1 = 'Port';
+        const direction = port.input ? 'Input' : port.output ? 'Output' : 'Bidirectional';
+        const type1 = options?.showSignalType && port.signal?.ref
+            ? `Port (${direction} ${port.signal.ref.name})`
+            : 'Port';
         const subports = port.port.subports?.map(sp => sp.name) || [];
 
         let output = `${indent}node [shape=box, fillcolor=${COLOR_PORT}, style=filled, label = ${this.createLabel(name1, type1, subports)}]; ${portId};\n`;

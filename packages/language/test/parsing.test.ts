@@ -1,60 +1,44 @@
-// import { beforeAll, describe, expect, test } from "vitest";
-// import { EmptyFileSystem, type LangiumDocument } from "langium";
-// import { expandToString as s } from "langium/generate";
-// import { parseHelper } from "langium/test";
-// import type { Model } from "sysla-language";
-// import { createSyslaServices, isModel } from "sysla-language";
+import { readFileSync } from 'node:fs';
+import { describe, expect, test } from 'vitest';
+import { parseModel } from './helpers.js';
 
-// let services: ReturnType<typeof createSyslaServices>;
-// let parse:    ReturnType<typeof parseHelper<Model>>;
-// let document: LangiumDocument<Model> | undefined;
+describe('Parsing SysLa', () => {
+    test('parses signals, port directions, subports, and comments', async () => {
+        const document = await parseModel(`
+            // Component interfaces
+            Signal Data
+            /* A reusable endpoint */
+            Component Endpoint
+                Port InputPort Input Data
+                Port OutputPort Output Data
+                Port Socket [Port Ethernet] Bidirectional Data
+                Port Screw
+        `);
+        expect(document.parseResult.lexerErrors).toHaveLength(0);
+        expect(document.parseResult.parserErrors).toHaveLength(0);
+        expect(document.diagnostics).toHaveLength(0);
+        const component = document.parseResult.value.components[0];
+        expect(component.name).toBe('Endpoint');
+        expect(component.ports[2].bidirectional).toBe(true);
+        expect(component.ports[2].port.subports[0].name).toBe('Ethernet');
+        expect(component.ports[3].signal).toBeUndefined();
+    });
 
-// beforeAll(async () => {
-//     services = createSyslaServices(EmptyFileSystem);
-//     parse = parseHelper<Model>(services.Sysla);
+    test.each(['Demo1', 'Computer'])('parses and validates the %s example', async example => {
+        const text = readFileSync(new URL(`../../../demos/${example}/${example}.sysla`, import.meta.url), 'utf8');
+        const document = await parseModel(text);
+        expect(document.parseResult.parserErrors).toHaveLength(0);
+        expect(document.diagnostics).toHaveLength(0);
+        expect(document.parseResult.value.components.some(component => component.name === 'Supersystem')).toBe(true);
+    });
 
-//     // activate the following if your linking test requires elements from a built-in library, for example
-//     // await services.shared.workspace.WorkspaceManager.initializeWorkspace([]);
-// });
+    test('rejects keywords from the older German grammar', async () => {
+        const document = await parseModel('Komponente Device');
+        expect(document.parseResult.parserErrors.length).toBeGreaterThan(0);
+    });
 
-// describe('Parsing tests', () => {
-
-//     test('parse simple Model', async () => {
-//         document = await parse(`
-//             person Langium
-//             Hello Langium!
-//         `);
-
-//         // check for absence of parser errors the classic way:
-//         //  deactivated, find a much more human readable way below!
-//         // expect(document.parseResult.parserErrors).toHaveLength(0);
-
-//         expect(
-//             // here we use a (tagged) template expression to create a human readable representation
-//             //  of the AST part we are interested in and that is to be compared to our expectation;
-//             // prior to the tagged template expression we check for validity of the parsed document object
-//             //  by means of the reusable function 'checkDocumentValid()' to sort out (critical) typos first;
-//             checkDocumentValid(document) || s`
-//                 Persons:
-//                   ${document.parseResult.value?.persons?.map(p => p.name)?.join('\n  ')}
-//                 Greetings to:
-//                   ${document.parseResult.value?.greetings?.map(g => g.person.$refText)?.join('\n  ')}
-//             `
-//         ).toBe(s`
-//             Persons:
-//               Langium
-//             Greetings to:
-//               Langium
-//         `);
-//     });
-// });
-
-// function checkDocumentValid(document: LangiumDocument): string | undefined {
-//     return document.parseResult.parserErrors.length && s`
-//         Parser errors:
-//           ${document.parseResult.parserErrors.map(e => e.message).join('\n  ')}
-//     `
-//         || document.parseResult.value === undefined && `ParseResult is 'undefined'.`
-//         || !isModel(document.parseResult.value) && `Root AST object is a ${document.parseResult.value.$type}, expected a 'Model'.`
-//         || undefined;
-// }
+    test('requires a signal type after a port direction', async () => {
+        const document = await parseModel('Component Device Port P Input');
+        expect(document.parseResult.parserErrors.length).toBeGreaterThan(0);
+    });
+});

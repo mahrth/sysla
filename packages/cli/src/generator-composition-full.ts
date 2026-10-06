@@ -1,5 +1,6 @@
 import type { Model, Component, PartPort, PartComponent } from 'sysla-language';
 import { GraphVizGeneratorBase, COLOR_COMPONENT, GraphGenerator } from './graphviz-generator.js';
+import { InternalConnection } from './generator-helpers.js';
 
 export class GeneratorCompositionFull extends GraphVizGeneratorBase implements GraphGenerator {
 
@@ -36,8 +37,7 @@ export class GeneratorCompositionFull extends GraphVizGeneratorBase implements G
         
         // Component ports
         for (const partPort of component.ports) {
-            const delegationInfo = delegations.get(partPort.port.name);
-            output += this.renderPortNode(partPort, { showSignal: !delegationInfo, indent: '\t' });
+            output += this.renderPortNode(partPort, { showSignal: false, showSignalType: true, indent: '\t' });
             output += `\t${id1} -> ${this.getPortNodeId(partPort)} [dir=none];\n`;
         }
         
@@ -54,13 +54,18 @@ export class GeneratorCompositionFull extends GraphVizGeneratorBase implements G
             const childComponent = partComponent.component.ref;
             if (childComponent) {
                 for (const childPort of childComponent.ports) {
-                    output += this.renderPortNode(childPort, { instance: partComponent, indent: '\t' });
+                    output += this.renderPortNode(childPort, { instance: partComponent, showSignal: false, showSignalType: true, indent: '\t' });
                     const portId = this.getPortNodeId(childPort, partComponent);
                     output += `\t${id2} -> ${portId} [dir=none];\n`;
                 }
             }
         }
         
+        // Connections between the ports of the parts
+        for (const connection of component.connections) {
+            output += this.renderConnection(new InternalConnection(connection), '\t');
+        }
+
         // Delegations
         for (const [proxyPortName, target] of delegations.entries()) {
             const proxyPort = component.ports.find(p => p.port.name === proxyPortName);

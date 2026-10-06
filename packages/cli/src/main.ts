@@ -20,7 +20,7 @@ export const generateAction = async (fileName: string, opts: GenerateOptions): P
     const model = await extractAstNodeWithDirectory<Model>(fileName, services);
     
     const generatedFilePath = generateJavaScript(model, fileName, opts.destination, services);
-    console.log(chalk.green(`JavaScript code generated successfully: ${generatedFilePath}`));
+    console.log(chalk.green(`Model artifacts generated successfully:\n${generatedFilePath}`));
 };
 
 export type GenerateOptions = {

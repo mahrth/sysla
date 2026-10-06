@@ -1,66 +1,118 @@
-// import { beforeAll, describe, expect, test } from "vitest";
-// import { EmptyFileSystem, type LangiumDocument } from "langium";
-// import { expandToString as s } from "langium/generate";
-// import { parseHelper } from "langium/test";
-// import type { Diagnostic } from "vscode-languageserver-types";
-// import type { Model } from "sysla-language";
-// import { createSyslaServices, isModel } from "sysla-language";
+import { describe, expect, test } from 'vitest';
+import { parseModel } from './helpers.js';
 
-// let services: ReturnType<typeof createSyslaServices>;
-// let parse:    ReturnType<typeof parseHelper<Model>>;
-// let document: LangiumDocument<Model> | undefined;
+async function errorMessages(text: string): Promise<string[]> {
+    const document = await parseModel(text);
+    expect(document.parseResult.parserErrors).toHaveLength(0);
+    return (document.diagnostics ?? []).filter(diagnostic => diagnostic.severity === 1).map(diagnostic => diagnostic.message);
+}
 
-// beforeAll(async () => {
-//     services = createSyslaServices(EmptyFileSystem);
-//     const doParse = parseHelper<Model>(services.Sysla);
-//     parse = (input: string) => doParse(input, { validation: true });
+describe('Validating connections', () => {
+    test.each([
+        ['Output Data', 'Input Data', true],
+        ['Input Data', 'Output Data', true],
+        ['Bidirectional Data', 'Bidirectional Data', true],
+        ['', '', true],
+        ['Output Data', 'Output Data', false],
+        ['Input Data', 'Input Data', false],
+        ['Output Data', 'Input Other', false],
+        ['Bidirectional Data', 'Input Data', false],
+        ['Output Data', '', false]
+    ])('%s to %s: valid=%s', async (source, sink, valid) => {
+        const errors = await errorMessages(`
+            Signal Data
+            Signal Other
+            Component Source Port P ${source}
+            Component Sink Port P ${sink}
+            Component Root
+                Part Source as source
+                Part Sink as sink
+                Connection source:P - sink:P
+        `);
+        expect(errors.length === 0).toBe(valid);
+    });
 
-//     // activate the following if your linking test requires elements from a built-in library, for example
-//     // await services.shared.workspace.WorkspaceManager.initializeWorkspace([]);
-// });
+    test('rejects multiple connections to one instance port', async () => {
+        const errors = await errorMessages(`
+            Signal Data
+            Component Source Port P Output Data
+            Component Sink Port P Input Data
+            Component Root
+                Part Source as source
+                Part Sink as a
+                Part Sink as b
+                Connection source:P - a:P
+                Connection source:P - b:P
+        `);
+        expect(errors).toContain('Port ist mehrfach verbunden.');
+    });
 
-// describe('Validating', () => {
+    test('allows the same port on separate instances', async () => {
+        const errors = await errorMessages(`
+            Signal Data
+            Component Source Port P Output Data
+            Component Sink Port P Input Data
+            Component Root
+                Part Source as source1
+                Part Source as source2
+                Part Sink as a
+                Part Sink as b
+                Connection source1:P - a:P
+                Connection source2:P - b:P
+        `);
+        expect(errors).toHaveLength(0);
+    });
+});
 
-//     test('check no errors', async () => {
-//         document = await parse(`
-//             person Langium
-//         `);
+describe('Validating delegations', () => {
+    test.each([
+        ['Input Data', 'Input Data', true],
+        ['Output Data', 'Output Data', true],
+        ['Bidirectional Data', 'Bidirectional Data', true],
+        ['', '', true],
+        ['Input Data', 'Output Data', false],
+        ['Output Data', 'Input Data', false],
+        ['Input Data', 'Input Other', false],
+        ['Bidirectional Data', 'Input Data', false]
+    ])('%s to %s: valid=%s', async (outer, inner, valid) => {
+        const errors = await errorMessages(`
+            Signal Data
+            Signal Other
+            Component Leaf Port P ${inner}
+            Component Root
+                Port P ${outer}
+                Part Leaf as leaf
+                Delegation P - leaf:P
+        `);
+        expect(errors.length === 0).toBe(valid);
+    });
 
-//         expect(
-//             // here we first check for validity of the parsed document object by means of the reusable function
-//             //  'checkDocumentValid()' to sort out (critical) typos first,
-//             // and then evaluate the diagnostics by converting them into human readable strings;
-//             // note that 'toHaveLength()' works for arrays and strings alike ;-)
-//             checkDocumentValid(document) || document?.diagnostics?.map(diagnosticToString)?.join('\n')
-//         ).toHaveLength(0);
-//     });
+    test('rejects delegating a port that is already connected', async () => {
+        const errors = await errorMessages(`
+            Signal Data
+            Component Source Port P Output Data
+            Component Sink Port P Input Data
+            Component Root
+                Port P Input Data
+                Part Source as source
+                Part Sink as sink
+                Connection source:P - sink:P
+                Delegation P - sink:P
+        `);
+        expect(errors).toContain('Port ist mehrfach verbunden.');
+    });
 
-//     test('check capital letter validation', async () => {
-//         document = await parse(`
-//             person langium
-//         `);
-
-//         expect(
-//             checkDocumentValid(document) || document?.diagnostics?.map(diagnosticToString)?.join('\n')
-//         ).toEqual(
-//             // 'expect.stringContaining()' makes our test robust against future additions of further validation rules
-//             expect.stringContaining(s`
-//                 [1:19..1:26]: Person name should start with a capital.
-//             `)
-//         );
-//     });
-// });
-
-// function checkDocumentValid(document: LangiumDocument): string | undefined {
-//     return document.parseResult.parserErrors.length && s`
-//         Parser errors:
-//           ${document.parseResult.parserErrors.map(e => e.message).join('\n  ')}
-//     `
-//         || document.parseResult.value === undefined && `ParseResult is 'undefined'.`
-//         || !isModel(document.parseResult.value) && `Root AST object is a ${document.parseResult.value.$type}, expected a 'Model'.`
-//         || undefined;
-// }
-
-// function diagnosticToString(d: Diagnostic) {
-//     return `[${d.range.start.line}:${d.range.start.character}..${d.range.end.line}:${d.range.end.character}]: ${d.message}`;
-// }
+    test('rejects multiple delegations of the same external port', async () => {
+        const errors = await errorMessages(`
+            Signal Data
+            Component Sink Port P Input Data
+            Component Root
+                Port P Input Data
+                Part Sink as a
+                Part Sink as b
+                Delegation P - a:P
+                Delegation P - b:P
+        `);
+        expect(errors).toContain('Port ist mehrfach verbunden.');
+    });
+});

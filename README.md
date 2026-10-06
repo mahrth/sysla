@@ -217,11 +217,11 @@ generated/Computer/
 | ------------------------------ | ------------------------------------------------------------------------------ |
 | `<filename>.txt`               | Summary of all signals, components, ports, parts, connections, and delegations |
 | `*_Decomposition.dot`          | Decomposition of a component into its own ports and parts                      |
-| `*_Composition.dot`            | Structure showing part ports, signal types, and delegations                    |
+| `*_Composition.dot`            | Component and part ports with their connections and delegations               |
 | `*_Composition_<instance>.dot` | Connections between an instance and its immediate neighbors                    |
 | `gen-pdfs.sh`                  | Script that recursively converts all DOT files in the output folder to PDFs    |
 
-The general composition views do not draw `Connection` relationships as individual connection edges; use the composition views for individual instances to inspect those relationships. Identical signal types are represented by shared signal nodes in the diagrams.
+Both composition views draw the modeled `Connection` relationships. Each typed connection has its own signal node, even when several connections use the same signal type. Arrows run from output ports through the signal node to input ports; bidirectional and untyped connections have no arrows. Untyped connections link the ports directly. Delegations appear as dashed edges in the general composition view. Unconnected ports remain visible there, with their direction and signal type in the port label, but have no connection edges.
 
 Generate PDFs:
 
@@ -284,10 +284,31 @@ npm run watch
 The second command watches TypeScript compilation. After changing the extension,
 also run `npm run build` and restart the Extension Development Host so that the bundled `.cjs` files are updated as well.
 
+### Running tests
+
+From the repository root:
+
+```bash
+npm test
+```
+
+This builds the workspace and runs the language and CLI tests. The language
+tests cover parsing, reference resolution across components and files, signal
+compatibility, port directions, and multiple connections or delegations. The
+CLI integration tests run the actual command in temporary directories, check
+the versioned examples, and verify that invalid input produces an error exit
+status without creating or overwriting generated artifacts.
+
+After building, individual suites can also be run with:
+
+```bash
+npm run --workspace packages/language test
+npm run --workspace packages/cli test
+```
+
 ## Known limitations and troubleshooting
 
-- **CLI reports success for an invalid model:** The active CLI loading path runs validation but currently does not abort when diagnostics are reported. A success message therefore does not guarantee a valid model. Fix errors in the editor before generating output. The message “JavaScript code generated successfully” is leftover template text; the actual output consists of text and DOT files.
-- **Tests:** `npm test` is configured but currently fails with “No test suite found” because all three test files contain commented-out templates. There are no active automated language tests yet.
+- **CLI rejects an invalid model:** Validation errors in the selected file or any companion `.sysla` file abort generation with exit status 1. Diagnostics include the source file, line, and column. Fix the reported errors and rerun the command. Existing output remains untouched when validation fails.
 - **Editor does not recognize SysLa:** Open the file in the second window launched with `F5` and check that its extension is `.sysla`.
 - **References to other files are missing:** Open the shared model folder in the Extension Development Host. For the CLI, files must be directly in the same directory.
 - **Language server waits on startup:** Use **Run Extension (No Debug)** or attach the debugger to the debug configuration.
