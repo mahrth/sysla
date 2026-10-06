@@ -28,20 +28,6 @@ export function registerValidationChecks(services: SyslaServices) {
 }
 
 /**
- * Repräsentiert einen Anker: Kombination aus Instanz und Port
- */
-class Anker {
-    constructor(
-        public readonly instanz: Instance,
-        public readonly port: PartPort
-    ) {}
-
-    equals(other: Anker): boolean {
-        return this.instanz === other.instanz && this.port === other.port;
-    }
-}
-
-/**
  * Implementation of custom validations.
  */
 export class SyslaValidator {
@@ -65,8 +51,19 @@ export class SyslaValidator {
      * Prüft auf mehrfach verbundene Ports in Verbindungen und Delegationen
      */
     checkMehrfachverbindungen(komponente: Component, accept: ValidationAcceptor): void {
-        const verwendeteAnker = new Map<string, Anker>();
-        const verwendetePorts = new Map<string, PartPort>();
+        const verwendeteAnker = new Map<Instance, Set<PartPort>>();
+        const verwendetePorts = new Set<PartPort>();
+
+        // Instanz und Port anhand ihrer Identität unterscheiden, unabhängig von Namen.
+        const registriereAnker = (instanz: Instance, port: PartPort): boolean => {
+            const ports = verwendeteAnker.get(instanz) ?? new Set<PartPort>();
+            if (ports.has(port)) {
+                return false;
+            }
+            ports.add(port);
+            verwendeteAnker.set(instanz, ports);
+            return true;
+        };
 
         // Prüfe Verbindungen
         for (const verbindung of komponente.connections) {
@@ -74,24 +71,14 @@ export class SyslaValidator {
             const port2 = this.getPortVonInstanz(verbindung.components2?.ref, verbindung.port2?.ref);
 
             if (port1 && verbindung.components1?.ref) {
-                const anker1 = new Anker(verbindung.components1.ref, port1);
-                const key1 = this.getAnkerKey(verbindung.components1.ref, port1);
-                
-                if (verwendeteAnker.has(key1)) {
+                if (!registriereAnker(verbindung.components1.ref, port1)) {
                     accept('error', 'Port ist mehrfach verbunden.', { node: verbindung, property: 'port1' });
-                } else {
-                    verwendeteAnker.set(key1, anker1);
                 }
             }
 
             if (port2 && verbindung.components2?.ref) {
-                const anker2 = new Anker(verbindung.components2.ref, port2);
-                const key2 = this.getAnkerKey(verbindung.components2.ref, port2);
-                
-                if (verwendeteAnker.has(key2)) {
+                if (!registriereAnker(verbindung.components2.ref, port2)) {
                     accept('error', 'Port ist mehrfach verbunden.', { node: verbindung, property: 'port2' });
-                } else {
-                    verwendeteAnker.set(key2, anker2);
                 }
             }
         }
@@ -101,25 +88,18 @@ export class SyslaValidator {
             // port1: Port der Komponente selbst
             const port1 = komponente.ports.find(p => p.port.name === delegation.port1?.ref?.name);
             if (port1) {
-                const key1 = this.getPortKey(port1);
-                
-                if (verwendetePorts.has(key1)) {
+                if (verwendetePorts.has(port1)) {
                     accept('error', 'Port ist mehrfach verbunden.', { node: delegation, property: 'port1' });
                 } else {
-                    verwendetePorts.set(key1, port1);
+                    verwendetePorts.add(port1);
                 }
             }
 
             // port2: Port der Instanz
             const port2 = this.getPortVonInstanz(delegation.components2?.ref, delegation.port2?.ref);
             if (port2 && delegation.components2?.ref) {
-                const anker2 = new Anker(delegation.components2.ref, port2);
-                const key2 = this.getAnkerKey(delegation.components2.ref, port2);
-                
-                if (verwendeteAnker.has(key2)) {
+                if (!registriereAnker(delegation.components2.ref, port2)) {
                     accept('error', 'Port ist mehrfach verbunden.', { node: delegation, property: 'port2' });
-                } else {
-                    verwendeteAnker.set(key2, anker2);
                 }
             }
         }
@@ -269,11 +249,4 @@ export class SyslaValidator {
         return komponente.ports.find((bp: PartPort) => bp.port.name === port.name);
     }
 
-    private getAnkerKey(instanz: Instance, port: PartPort): string {
-        return `${instanz.name}_${port.port.name}`;
-    }
-
-    private getPortKey(port: PartPort): string {
-        return port.port.name;
-    }
 }

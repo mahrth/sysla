@@ -218,6 +218,29 @@ Delegation Second - b:P
     assert.equal(graph.edges.filter(edge => graph.nodes.get(edge.from).type.startsWith('Port')).length, 2);
 });
 
+test('generates a model with distinct underscore-containing connection and delegation endpoints', t => {
+    const result = generate(t, { 'Main.sysla': `
+Component Device Port c Port b_c
+Component Peer Port P
+Component Root
+    Port External
+    Part Device as a_b
+    Part Device as a
+    Part Peer as peer
+    Connection a_b:c - peer:P
+    Delegation External - a:b_c
+` });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    const graph = readGraph(path.join(result.output, 'Main', 'Root', 'Root_Composition.dot'));
+    const connected = portId(graph, 'a_b:Device', 'c');
+    const peer = portId(graph, 'peer:Peer', 'P');
+    const external = portId(graph, 'Root', 'External');
+    const delegated = portId(graph, 'a:Device', 'b_c');
+    assert.ok(graph.edges.some(edge => edge.from === connected && edge.to === peer && edge.attributes === '[dir=none]'));
+    assert.ok(graph.edges.some(edge => edge.from === external && edge.to === delegated && edge.attributes.includes('style=dashed')));
+});
+
 test('rejects syntax errors in the selected file', t => {
     assertRejected(generate(t, { 'Main.sysla': 'Komponente Device' }), 'Main.sysla', 1);
 });

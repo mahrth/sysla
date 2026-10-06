@@ -62,6 +62,37 @@ describe('Validating connections', () => {
         `);
         expect(errors).toHaveLength(0);
     });
+
+    test.each([
+        ['Connection a_b:c - x:P', 'Connection a:b_c - y:P'],
+        ['Connection x:P - a_b:c', 'Connection y:P - a:b_c']
+    ])('distinguishes underscore-containing endpoint names: %s; %s', async (first, second) => {
+        const errors = await errorMessages(`
+            Component Device Port c Port b_c
+            Component Peer Port P
+            Component Root
+                Part Device as a_b
+                Part Device as a
+                Part Peer as x
+                Part Peer as y
+                ${first}
+                ${second}
+        `);
+        expect(errors).toHaveLength(0);
+    });
+
+    test('rejects reuse of an underscore-containing endpoint on either connection side', async () => {
+        const errors = await errorMessages(`
+            Component Device Port data_port
+            Component Root
+                Part Device as source_device
+                Part Device as a
+                Part Device as b
+                Connection source_device:data_port - a:data_port
+                Connection b:data_port - source_device:data_port
+        `);
+        expect(errors).toEqual(['Port ist mehrfach verbunden.']);
+    });
 });
 
 describe('Validating delegations', () => {
@@ -114,5 +145,71 @@ describe('Validating delegations', () => {
                 Delegation P - b:P
         `);
         expect(errors).toContain('Port ist mehrfach verbunden.');
+    });
+
+    test('distinguishes underscore-containing endpoints of separate delegations', async () => {
+        const errors = await errorMessages(`
+            Component Device Port c Port b_c
+            Component Root
+                Port First Port Second
+                Part Device as a_b
+                Part Device as a
+                Delegation First - a_b:c
+                Delegation Second - a:b_c
+        `);
+        expect(errors).toHaveLength(0);
+    });
+
+    test('allows delegating the same port definition on separate instances', async () => {
+        const errors = await errorMessages(`
+            Component Device Port data_port
+            Component Root
+                Port First Port Second
+                Part Device as a
+                Part Device as b
+                Delegation First - a:data_port
+                Delegation Second - b:data_port
+        `);
+        expect(errors).toHaveLength(0);
+    });
+
+    test('distinguishes underscore-containing endpoints across a connection and a delegation', async () => {
+        const errors = await errorMessages(`
+            Component Device Port c Port b_c
+            Component Peer Port P
+            Component Root
+                Port External
+                Part Device as a_b
+                Part Device as a
+                Part Peer as peer
+                Connection a_b:c - peer:P
+                Delegation External - a:b_c
+        `);
+        expect(errors).toHaveLength(0);
+    });
+
+    test('rejects multiple delegations to an underscore-containing instance port', async () => {
+        const errors = await errorMessages(`
+            Component Device Port data_port
+            Component Root
+                Port First Port Second
+                Part Device as child_device
+                Delegation First - child_device:data_port
+                Delegation Second - child_device:data_port
+        `);
+        expect(errors).toEqual(['Port ist mehrfach verbunden.']);
+    });
+
+    test('rejects connecting and delegating the same underscore-containing endpoint', async () => {
+        const errors = await errorMessages(`
+            Component Device Port data_port
+            Component Root
+                Port External
+                Part Device as child_device
+                Part Device as peer
+                Connection peer:data_port - child_device:data_port
+                Delegation External - child_device:data_port
+        `);
+        expect(errors).toEqual(['Port ist mehrfach verbunden.']);
     });
 });
