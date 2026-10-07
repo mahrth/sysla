@@ -4,7 +4,7 @@
     "version": "0.0.1",
     "type": "module",
     "engines": {
-        "node": ">=20.10.0",
+        "node": "^22.12.0 || >=24.0.0",
         "npm": ">=10.2.3"
     },
     "files": [
@@ -16,7 +16,7 @@
         "sysla-cli": "./bin/cli.js"
     },
     "scripts": {
-        "clean": "shx rm -fr *.tsbuildinfo out",
+        "clean": "node ../../scripts/workspace-files.mjs clean",
         "build": "echo 'No build step'",
         "build:clean": "npm run clean && npm run build",
         "test": "node --test test/*.test.mjs"
@@ -27,7 +27,7 @@
         "commander": "~11.1.0"
     },
     "volta": {
-        "node": "20.19.2",
-        "npm": "10.8.2"
+        "node": "24.18.0",
+        "npm": "11.16.0"
     }
 }

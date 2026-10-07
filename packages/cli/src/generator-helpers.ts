@@ -1,10 +1,26 @@
-import type { PartComponent, PartPort, Connection, Component } from 'sysla-language';
+import type { PartComponent, PartPort, Connection, Component, Delegation } from 'sysla-language';
 
 export class Anchor {
     constructor(
         public partComponent: PartComponent,
         public partPort: PartPort
     ) {}
+}
+
+export class InternalDelegation {
+    port: PartPort;
+    anchor: Anchor;
+
+    constructor(component: Component, delegation: Delegation) {
+        const port = component.ports.find(port => port.port === delegation.port1.ref);
+        const part = component.parts.find(part => part.instance === delegation.components2.ref);
+        const targetPort = part?.component.ref?.ports.find(port => port.port === delegation.port2.ref);
+        if (!port || !part || !targetPort) {
+            throw new Error('Could not resolve delegation references');
+        }
+        this.port = port;
+        this.anchor = new Anchor(part, targetPort);
+    }
 }
 
 export class InternalConnection {

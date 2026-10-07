@@ -5,7 +5,7 @@
     "displayName": "sysla",
     "type": "module",
     "engines": {
-        "vscode": "^1.67.0"
+        "vscode": "^1.91.0"
     },
     "categories": [
         "Programming Languages"
@@ -28,20 +28,20 @@
     ],
     "main": "./out/extension/main.cjs",
     "scripts": {
-        "clean": "shx rm -fr *.tsbuildinfo out syntaxes",
+        "clean": "node ../../scripts/workspace-files.mjs clean syntaxes",
         "vscode:prepublish": "npm run build",
-        "build:prepare": "shx mkdir -p ./syntaxes/ && shx cp -f ../language/syntaxes/sysla.tmLanguage.json ./syntaxes/sysla.tmLanguage.json",
+        "build:prepare": "node ../../scripts/workspace-files.mjs prepare-extension",
         "build": "npm run build:prepare && tsc -b tsconfig.json && node esbuild.mjs",
         "build:clean": "npm run clean && npm run build",
         "watch": "npm run build:prepare && concurrently -n tsc,esbuild -c blue,yellow \"tsc -b tsconfig.json --watch\" \"node esbuild.mjs --watch\""
     },
     "dependencies": {
         "sysla-language": "0.0.1",
-        "vscode-languageclient": "~9.0.1",
-        "vscode-languageserver": "~9.0.1"
+        "vscode-languageclient": "~10.1.2",
+        "vscode-languageserver": "~10.1.2"
     },
     "devDependencies": {
-        "@types/vscode": "~1.67.0",
+        "@types/vscode": "~1.91.0",
         "concurrently": "~8.2.1",
         "esbuild": "~0.25.5"
     },

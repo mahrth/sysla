@@ -58,7 +58,8 @@ describe('Linking SysLa', () => {
 
     test('reports unresolved component references', async () => {
         const document = await parseModel('Component Root Part Missing as missing');
-        expect(document.diagnostics?.some(diagnostic => diagnostic.severity === 1 && diagnostic.message.includes('Missing'))).toBe(true);
+        expect(document.diagnostics?.some(diagnostic => diagnostic.severity === 1
+            && (typeof diagnostic.message === 'string' ? diagnostic.message : diagnostic.message.value).includes('Missing'))).toBe(true);
     });
 
     test('does not resolve a connection against an unrelated component port', async () => {

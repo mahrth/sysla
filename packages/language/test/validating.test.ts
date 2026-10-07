@@ -4,7 +4,8 @@ import { parseModel } from './helpers.js';
 async function errorMessages(text: string): Promise<string[]> {
     const document = await parseModel(text);
     expect(document.parseResult.parserErrors).toHaveLength(0);
-    return (document.diagnostics ?? []).filter(diagnostic => diagnostic.severity === 1).map(diagnostic => diagnostic.message);
+    return (document.diagnostics ?? []).filter(diagnostic => diagnostic.severity === 1)
+        .map(diagnostic => typeof diagnostic.message === 'string' ? diagnostic.message : diagnostic.message.value);
 }
 
 describe('Validating connections', () => {

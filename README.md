@@ -49,10 +49,10 @@ In VSCodium, open **Run and Debug** (`Ctrl+Shift+D`), select **Run Extension (No
 
 ### Node.js, npm, and Graphviz
 
-The language and CLI packages require at least Node.js `20.10.0` and npm `10.2.3`.
-The Volta entries in the package manifests record the original development
-environment: Node.js `20.19.2` and npm `10.8.2`. When the project was set up again
-in October 2026, grammar generation and the build also worked with Node.js `24.18.0` and npm `11.16.0`.
+Use Node.js 24 LTS for development. The workspace supports Node.js 22 from
+`22.12.0` and Node.js 24 or newer, with npm `10.2.3` or newer. The Volta entries
+pin the tested environment: Node.js `24.18.0` and npm `11.16.0`.
+The editor extension requires VSCodium/VS Code `1.91.0` or newer.
 
 Graphviz provides the `dot` command for PDF generation. On Ubuntu:
 
@@ -70,7 +70,42 @@ dot -V
 
 Python and pip are not required for the regular SysLa build.
 Running `npm install` from the repository root installs the dependencies
-for all three workspace packages. `npm ci` requires an existing `package-lock.json` that matches the package manifests; the lockfile is currently not tracked in this repository.
+for all three workspace packages. Keep `package-lock.json` together with the
+package manifests in version control so that other machines use the same
+dependency versions. With a matching lockfile, use `npm ci` for reproducible
+installations.
+
+### npm dependency and installation-script warnings
+
+Check dependency advisories with `npm audit`. `npm audit fix` updates packages
+within the declared version ranges; advisories that require changes to these
+ranges need a deliberate update followed by grammar generation, a clean build,
+and tests:
+
+```bash
+npm run langium:generate
+npm run build:clean
+npm test
+```
+
+Avoid applying `npm audit fix --force` without reviewing its proposed changes.
+The build uses native Node.js file operations instead of `shx`, avoiding its
+additional dependency chain.
+
+Recent npm versions also warn about unreviewed dependency installation scripts.
+The root `package.json` explicitly approves `esbuild@0.25.12`: its installer
+prepares and checks the native binary used to bundle the editor extension.
+After intentionally updating esbuild, review the new version's installer before
+approving it from the repository root:
+
+```bash
+npm approve-scripts --allow-scripts-pending
+npm approve-scripts esbuild
+```
+
+The first command lists pending scripts; the second records approval for the
+installed esbuild version. See the [npm script-approval documentation](https://docs.npmjs.com/cli/v11/commands/npm-approve-scripts/).
+The message about packages "looking for funding" is informational.
 
 ### VSCodium or VS Code on Ubuntu
 
@@ -218,10 +253,14 @@ generated/Computer/
 | `<filename>.txt`               | Summary of all signals, components, ports, parts, connections, and delegations |
 | `*_Decomposition.dot`          | Decomposition of a component into its own ports and parts                      |
 | `*_Composition.dot`            | Component and part ports with their connections and delegations               |
-| `*_Composition_<instance>.dot` | Connections between an instance and its immediate neighbors                    |
+| `*_Composition_<instance>.dot` | An instance's connections to its neighbors and delegations to external ports   |
 | `gen-pdfs.sh`                  | Script that recursively converts all DOT files in the output folder to PDFs    |
 
-Both composition views draw the modeled `Connection` relationships. Each typed connection has its own signal node, even when several connections use the same signal type. Arrows run from output ports through the signal node to input ports; bidirectional and untyped connections have no arrows. Untyped connections link the ports directly. Delegations appear as dashed edges in the general composition view. Unconnected ports remain visible there, with their direction and signal type in the port label, but have no connection edges.
+All diagrams use compact component boxes with integrated ports. Instance headers use `instance : ComponentType`, optionally split across two lines. Input and output ports share a row when both are present; a single port on a row spans the entire box, as do bidirectional and untyped ports. Port text is centered and includes directions, signal types, and subports. The decomposition view shows the component's own ports and its direct part instances, linked by structural edges.
+
+Both composition views draw each modeled `Connection` as a separate edge between the corresponding port cells. Connections use a uniform gray color. Neither connections nor delegations carry signal labels; the signal types remain visible in the ports. Arrows run from output to input ports; bidirectional connections and delegations have arrowheads at both ends, while untyped relationships have no arrows. External inputs appear on the left and external outputs on the right. These external boxes represent the enclosing component's interface and use paler backgrounds for both headers and ports. Delegations appear as dashed edges with arrows following the signal flow. Unconnected ports remain visible in the general composition view but have no connection edges. Component membership is shown by the boxes rather than additional edges, so the composition layout follows the actual connections.
+
+The individual instance views include its connections to immediate neighbors and its delegations to the enclosing component's external ports. Only ports involved in these relationships are shown. An instance with delegations but no connections also receives a view; instances with neither receive none.
 
 Generate PDFs:
 
@@ -298,6 +337,10 @@ compatibility, port directions, and multiple connections or delegations. The
 CLI integration tests run the actual command in temporary directories, check
 the versioned examples, and verify that invalid input produces an error exit
 status without creating or overwriting generated artifacts.
+They also check the compact diagram structure and the exact port endpoints of
+connections and delegations. When Graphviz is installed, an additional test
+renders all versioned demo diagrams and checks for errors or port warnings;
+that rendering test is skipped when Graphviz is unavailable.
 
 After building, individual suites can also be run with:
 

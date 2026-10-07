@@ -72,7 +72,8 @@ function exitOnValidationErrors(documents: LangiumDocument[]): void {
         const line = diagnostic.range.start.line + 1;
         const column = diagnostic.range.start.character + 1;
         const text = document.textDocument.getText(diagnostic.range);
-        console.error(chalk.red(`${document.uri.fsPath}:${line}:${column}: ${diagnostic.message} [${text}]`));
+        const message = typeof diagnostic.message === 'string' ? diagnostic.message : diagnostic.message.value;
+        console.error(chalk.red(`${document.uri.fsPath}:${line}:${column}: ${message} [${text}]`));
     }
     process.exit(1);
 }

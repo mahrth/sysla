@@ -40,9 +40,16 @@ function readGraph(filename) {
     for (const match of dot.matchAll(/(ID_\d+) \[label=<<TABLE\b[^>]*>(.*?)<\/TABLE>>\];/g)) {
         const header = match[2].match(/<B>(.*?)<\/B>.*?<FONT POINT-SIZE="9">(.*?)<\/FONT>/);
         assert.ok(header, match[0]);
-        nodes.set(match[1], { name: header[1].replace(/<BR\/>/g, ' ').replace(/\s*:\s*/g, ':'), type: header[2] });
-        for (const port of match[2].matchAll(/<TD PORT="(ID_\d+)"[^>]*><FONT POINT-SIZE="11">(.*?)<\/FONT><BR\/><FONT POINT-SIZE="9">(.*?)<\/FONT><\/TD>/g)) {
-            nodes.set(`${match[1]}:${port[1]}`, { name: port[2], type: `Port (${port[3]})`, parent: match[1] });
+        nodes.set(match[1], {
+            name: header[1].replace(/<BR\/>/g, ' ').replace(/\s*:\s*/g, ':'),
+            type: header[2],
+            background: match[2].match(/BGCOLOR="([^"]*)"/)[1]
+        });
+        for (const port of match[2].matchAll(/<TD PORT="(ID_\d+)"([^>]*)><FONT POINT-SIZE="11">(.*?)<\/FONT><BR\/><FONT POINT-SIZE="9">(.*?)<\/FONT><\/TD>/g)) {
+            nodes.set(`${match[1]}:${port[1]}`, {
+                name: port[3], type: `Port (${port[4]})`, parent: match[1],
+                background: port[2].match(/BGCOLOR="([^"]*)"/)[1]
+            });
         }
     }
     const edges = [...dot.matchAll(/(ID_\d+(?::ID_\d+)?)(?::[ew])? -> (ID_\d+(?::ID_\d+)?)(?::[ew])?\s*(\[[^\]]*\])?;/g)]
@@ -220,6 +227,57 @@ Delegation Second - b:P
         assert.equal(graph.edges.filter(edge => edge.from === spare || edge.to === spare).length, 0);
     }
     assert.equal(graph.edges.filter(edge => graph.nodes.get(edge.from).type.startsWith('Port')).length, 2);
+    for (const [instance, external] of [['a', 'First'], ['b', 'Second']]) {
+        const partial = readGraph(path.join(result.output, 'Main', 'Root', `Root_Composition_${instance}.dot`));
+        assert.equal(partial.edges.length, 1);
+        assert.deepEqual([partial.edges[0].from, partial.edges[0].to], [portId(partial, 'Root', external), portId(partial, `${instance}:Sink`, 'P')]);
+        assert.equal([...partial.nodes.values()].filter(node => node.parent).length, 2);
+    }
+    for (const spare of ['spare1', 'spare2']) {
+        assert.equal(existsSync(path.join(result.output, 'Main', 'Root', `Root_Composition_${spare}.dot`)), false);
+    }
+});
+
+test('includes external delegation partners alongside connections only for the focused instance', t => {
+    const result = generate(t, { 'Main.sysla': `
+Signal Data
+Component Leaf
+    Port P Input Data
+    Port Internal Output Data
+Component Peer Port P Input Data
+Component Root
+    Port External Input Data
+    Port Other Input Data
+    Part Leaf as a
+    Part Peer as b
+    Part Leaf as spare
+    Connection a:Internal - b:P
+    Delegation External - a:P
+    Delegation Other - spare:P
+` });
+    assert.equal(result.status, 0, result.stderr);
+    const directory = path.join(result.output, 'Main', 'Root');
+    const partial = readGraph(path.join(directory, 'Root_Composition_a.dot'));
+    assert.equal(partial.edges.length, 2);
+    assertConnections(partial, 'Data', [[['a:Leaf', 'Internal'], ['b:Peer', 'P']]]);
+    const external = portId(partial, 'Root', 'External');
+    const internal = portId(partial, 'a:Leaf', 'P');
+    const delegation = partial.edges.find(edge => edge.attributes.includes('style=dashed'));
+    assert.deepEqual([delegation.from, delegation.to], [external, internal]);
+    assert.ok(![...partial.nodes.values()].some(node => node.name === 'Other' || node.name === 'spare:Leaf'));
+    const outerPort = partial.nodes.get(external);
+    const innerPort = partial.nodes.get(internal);
+    assert.notEqual(outerPort.background, innerPort.background);
+    assert.notEqual(partial.nodes.get(outerPort.parent).background, partial.nodes.get(innerPort.parent).background);
+
+    const full = readGraph(path.join(directory, 'Root_Composition.dot'));
+    const fullExternal = full.nodes.get(portId(full, 'Root', 'External'));
+    assert.equal(fullExternal.background, outerPort.background);
+    assert.equal(full.nodes.get(fullExternal.parent).background, partial.nodes.get(outerPort.parent).background);
+
+    const peerView = readGraph(path.join(directory, 'Root_Composition_b.dot'));
+    assert.equal(peerView.edges.length, 1);
+    assert.ok(![...peerView.nodes.values()].some(node => node.type.startsWith('External')));
 });
 
 test('generates a model with distinct underscore-containing connection and delegation endpoints', t => {
@@ -282,11 +340,13 @@ Component Leaf
     Port Out Output Data
     Port Bus Bidirectional Data
     Port Mount
+    Port Unused Bidirectional Data
 Component Root
     Port In Input Data
     Port Out Output Data
     Port Bus Bidirectional Data
     Port Mount
+    Port Unused Bidirectional Data
     Part Leaf as leaf
     Delegation In - leaf:In
     Delegation Out - leaf:Out
@@ -294,18 +354,23 @@ Component Root
     Delegation Mount - leaf:Mount
 ` });
     assert.equal(result.status, 0, result.stderr);
-    const graph = readGraph(path.join(result.output, 'Main', 'Root', 'Root_Composition.dot'));
-    assert.equal(graph.edges.length, 4);
-    for (const [name, outward, direction] of [['In', false, 'forward'], ['Out', true, 'forward'], ['Bus', false, 'both'], ['Mount', false, 'none']]) {
-        const outer = portId(graph, 'Root', name);
-        const inner = portId(graph, 'leaf:Leaf', name);
-        const edge = graph.edges.find(edge => edge.from === (outward ? inner : outer) && edge.to === (outward ? outer : inner));
-        assert.ok(edge, `Missing delegation for ${name}`);
-        assert.match(edge.attributes, /style=dashed/);
-        if (direction === 'forward') {
-            assert.doesNotMatch(edge.attributes, /dir=/);
-        } else {
-            assert.ok(edge.attributes.includes(`dir=${direction}`), edge.attributes);
+    for (const filename of ['Root_Composition.dot', 'Root_Composition_leaf.dot']) {
+        const graph = readGraph(path.join(result.output, 'Main', 'Root', filename));
+        assert.equal(graph.edges.length, 4);
+        for (const [name, outward, direction] of [['In', false, 'forward'], ['Out', true, 'forward'], ['Bus', false, 'both'], ['Mount', false, 'none']]) {
+            const outer = portId(graph, 'Root', name);
+            const inner = portId(graph, 'leaf:Leaf', name);
+            const edge = graph.edges.find(edge => edge.from === (outward ? inner : outer) && edge.to === (outward ? outer : inner));
+            assert.ok(edge, `Missing delegation for ${name}`);
+            assert.match(edge.attributes, /style=dashed/);
+            if (direction === 'forward') {
+                assert.doesNotMatch(edge.attributes, /dir=/);
+            } else {
+                assert.ok(edge.attributes.includes(`dir=${direction}`), edge.attributes);
+            }
+        }
+        if (filename === 'Root_Composition_leaf.dot') {
+            assert.ok(![...graph.nodes.values()].some(node => node.name === 'Unused'));
         }
     }
 });

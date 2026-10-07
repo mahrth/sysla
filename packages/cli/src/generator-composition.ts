@@ -1,6 +1,6 @@
 import type { Model, Component, PartComponent, PartPort } from 'sysla-language';
 import { GraphVizGeneratorBase, type GraphGenerator } from './graphviz-generator.js';
-import { InternalConnection } from './generator-helpers.js';
+import { InternalConnection, InternalDelegation } from './generator-helpers.js';
 
 export class GeneratorComposition extends GraphVizGeneratorBase implements GraphGenerator {
 
@@ -23,22 +23,39 @@ export class GeneratorComposition extends GraphVizGeneratorBase implements Graph
         this.resetIds();
         const graphNames: string[] = [];
         const neighbors = this.neighborComponents(component);
+        const delegationsByInstance = new Map<PartComponent, InternalDelegation[]>();
+        for (const delegation of component.delegations) {
+            const resolved = new InternalDelegation(component, delegation);
+            const instance = resolved.anchor.partComponent;
+            const delegations = delegationsByInstance.get(instance) ?? [];
+            delegations.push(resolved);
+            delegationsByInstance.set(instance, delegations);
+            if (!neighbors.has(instance)) {
+                neighbors.set(instance, []);
+            }
+        }
         
         for (const [partComponent, connections] of neighbors.entries()) {
             this.resetIds();
             const nameGraph = `${component.name}_Composition_${partComponent.instance.name}`;
             graphNames.push(nameGraph);
             
-            const dotContent = this.compileNeighbors(partComponent, connections);
+            const dotContent = this.compileNeighbors(component, partComponent, connections, delegationsByInstance.get(partComponent) ?? []);
             this.writeDotFile(args.outputDir, nameGraph, dotContent);
         }
         
         return graphNames;
     }
 
-    private compileNeighbors(partComponent: PartComponent, connections: InternalConnection[]): string {
+    private compileNeighbors(
+        parent: Component,
+        partComponent: PartComponent,
+        connections: InternalConnection[],
+        delegations: InternalDelegation[]
+    ): string {
         let output = this.beginGraph(`${partComponent.instance.name} : ${partComponent.component.ref?.name} — Connections`);
         const portsByInstance = new Map<PartComponent, Set<PartPort>>();
+        portsByInstance.set(partComponent, new Set(delegations.map(delegation => delegation.anchor.partPort)));
         for (const connection of connections) {
             for (const anchor of [connection.anchor1, connection.anchor2]) {
                 const ports = portsByInstance.get(anchor.partComponent) ?? new Set<PartPort>();
@@ -54,6 +71,11 @@ export class GeneratorComposition extends GraphVizGeneratorBase implements Graph
         }
         for (const connection of connections) {
             output += this.renderConnection(connection);
+        }
+        const external = this.renderExternalPorts(parent, delegations.map(delegation => delegation.port));
+        output += external.output;
+        for (const delegation of delegations) {
+            output += this.renderDelegation(delegation, external.nodes.get(delegation.port)!);
         }
         return output + '}\n';
     }
