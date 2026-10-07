@@ -37,33 +37,36 @@ function assertRejected(result, file, line) {
 function readGraph(filename) {
     const dot = readFileSync(filename, 'utf8');
     const nodes = new Map();
-    for (const match of dot.matchAll(/node \[[^\n]*label = < <FONT POINT-SIZE="15">(.*?)<\/FONT><br\/><FONT POINT-SIZE="10">(.*?)<\/FONT> >\]; (ID_\d+);/g)) {
-        nodes.set(match[3], { name: match[1], type: match[2] });
+    for (const match of dot.matchAll(/(ID_\d+) \[label=<<TABLE\b[^>]*>(.*?)<\/TABLE>>\];/g)) {
+        const header = match[2].match(/<B>(.*?)<\/B>.*?<FONT POINT-SIZE="9">(.*?)<\/FONT>/);
+        assert.ok(header, match[0]);
+        nodes.set(match[1], { name: header[1].replace(/<BR\/>/g, ' ').replace(/\s*:\s*/g, ':'), type: header[2] });
+        for (const port of match[2].matchAll(/<TD PORT="(ID_\d+)"[^>]*><FONT POINT-SIZE="11">(.*?)<\/FONT><BR\/><FONT POINT-SIZE="9">(.*?)<\/FONT><\/TD>/g)) {
+            nodes.set(`${match[1]}:${port[1]}`, { name: port[2], type: `Port (${port[3]})`, parent: match[1] });
+        }
     }
-    const edges = [...dot.matchAll(/(ID_\d+) -> (ID_\d+)\s*(\[[^\]]*\])?;/g)]
+    const edges = [...dot.matchAll(/(ID_\d+(?::ID_\d+)?)(?::[ew])? -> (ID_\d+(?::ID_\d+)?)(?::[ew])?\s*(\[[^\]]*\])?;/g)]
         .map(match => ({ from: match[1], to: match[2], attributes: match[3] ?? '' }));
     assert.ok(nodes.size > 0, dot);
     return { nodes, edges };
 }
 
 function portId(graph, parentName, portName) {
-    const parent = [...graph.nodes].find(([, node]) => node.name === parentName);
-    assert.ok(parent, `Missing component or instance ${parentName}`);
-    const port = graph.edges.find(edge => edge.from === parent[0]
-        && graph.nodes.get(edge.to)?.name === portName
-        && graph.nodes.get(edge.to)?.type.startsWith('Port'));
+    const port = [...graph.nodes].find(([, node]) => node.name === portName && node.parent
+        && graph.nodes.get(node.parent)?.name === parentName);
     assert.ok(port, `Missing port ${parentName}:${portName}`);
-    return port.to;
+    return port[0];
 }
 
-function assertSignalConnections(graph, signalName, expectedPairs) {
-    const signals = [...graph.nodes].filter(([, node]) => node.type === 'Signal' && node.name === signalName);
-    assert.equal(signals.length, expectedPairs.length, 'Each connection must have its own signal node');
-    const actualPairs = signals.map(([id]) => graph.edges
-        .filter(edge => edge.from === id || edge.to === id)
-        .map(edge => edge.from === id ? edge.to : edge.from).sort());
+function assertConnections(graph, signalName, expectedPairs) {
+    const connections = graph.edges.filter(edge => !edge.attributes.includes('style=dashed')
+        && graph.nodes.get(edge.from)?.type.endsWith(` ${signalName})`)
+        && graph.nodes.get(edge.to)?.type.endsWith(` ${signalName})`));
+    assert.equal(connections.length, expectedPairs.length, 'Each modeled connection must have its own edge');
+    const actualPairs = connections.map(edge => [edge.from, edge.to].sort());
     const expectedIds = expectedPairs.map(pair => pair.map(([instance, port]) => portId(graph, instance, port)).sort());
-    assert.deepEqual(actualPairs.sort(), expectedIds.sort(), 'Signal nodes must link only the modeled endpoint pairs');
+    assert.deepEqual(actualPairs.sort(), expectedIds.sort(), 'Edges must link only the modeled endpoint pairs');
+    return connections;
 }
 
 for (const [example, diagramCount] of [['Demo1', 17], ['DemoMulti1', 17], ['Computer', 24]]) {
@@ -85,13 +88,16 @@ for (const [example, diagramCount] of [['Demo1', 17], ['DemoMulti1', 17], ['Comp
         if (example === 'Computer') {
             for (const filename of ['Supersystem_Composition.dot', 'Supersystem_Composition_computer.dot']) {
                 const graph = readGraph(path.join(modelDirectory, 'Supersystem', filename));
-                assertSignalConnections(graph, 'Data', [
+                const dataEdges = assertConnections(graph, 'Data', [
                     [['computer:Computer', 'RJ45_1 [Ethernet]'], ['nas1:NAS', 'RJ45 [Ethernet]']],
                     [['computer:Computer', 'RJ45_2 [Ethernet]'], ['nas2:NAS', 'RJ45 [Ethernet]']]
                 ]);
-                const dataIds = new Set([...graph.nodes].filter(([, node]) => node.type === 'Signal' && node.name === 'Data').map(([id]) => id));
-                for (const edge of graph.edges.filter(edge => dataIds.has(edge.from) || dataIds.has(edge.to))) {
-                    assert.match(edge.attributes, /dir=none/);
+                for (const edge of dataEdges) {
+                    assert.match(edge.attributes, /dir=both/);
+                }
+                for (const edge of graph.edges) {
+                    assert.match(edge.attributes, /color="#555555"/);
+                    assert.doesNotMatch(edge.attributes, /label=/);
                 }
             }
         }
@@ -121,16 +127,14 @@ Connection d:P - c:P
         ['Root_Composition_d.dot', [[['c:Source', 'P'], ['d:Sink', 'P']]]]
     ]) {
         const graph = readGraph(path.join(directory, filename));
-        assertSignalConnections(graph, 'Data', pairs);
-        // The direction of the modeled flow is output -> signal -> input.
+        assertConnections(graph, 'Data', pairs);
+        // The modeled flow runs directly from output to input.
         const flows = graph.edges.filter(edge => !edge.attributes.includes('dir=none'))
             .map(edge => edge.attributes.includes('dir=back') ? [edge.to, edge.from] : [edge.from, edge.to]);
         for (const [source, sink] of pairs) {
             const sourceId = portId(graph, ...source);
             const sinkId = portId(graph, ...sink);
-            const outgoing = flows.filter(([from]) => from === sourceId);
-            assert.equal(outgoing.length, 1);
-            assert.ok(flows.some(([from, to]) => from === outgoing[0][1] && to === sinkId));
+            assert.deepEqual(flows.filter(([from]) => from === sourceId), [[sourceId, sinkId]]);
             assert.match(graph.nodes.get(sourceId).type, /Output Data/);
             assert.match(graph.nodes.get(sinkId).type, /Input Data/);
         }
@@ -152,7 +156,7 @@ Connection a:Second - b:Second
     assert.equal(result.status, 0, result.stderr);
     for (const filename of ['Root_Composition.dot', 'Root_Composition_a.dot', 'Root_Composition_b.dot']) {
         const graph = readGraph(path.join(result.output, 'Main', 'Root', filename));
-        assertSignalConnections(graph, 'Data', [
+        assertConnections(graph, 'Data', [
             [['a:Device', 'First'], ['b:Device', 'First']],
             [['a:Device', 'Second'], ['b:Device', 'Second']]
         ]);
@@ -182,7 +186,7 @@ Connection a:P - b:P
         assert.equal([...graph.nodes.values()].filter(node => node.type === 'Signal').length, 0);
         if (filename === 'Root_Composition.dot') {
             const spare = portId(graph, 'spare:Device', 'P');
-            assert.equal(graph.edges.filter(edge => edge.from === spare || edge.to === spare).length, 1);
+            assert.equal(graph.edges.filter(edge => edge.from === spare || edge.to === spare).length, 0);
         }
     }
 });
@@ -213,7 +217,7 @@ Delegation Second - b:P
     for (const name of ['spare1:Sink', 'spare2:Sink']) {
         const spare = portId(graph, name, 'P');
         assert.match(graph.nodes.get(spare).type, /Input Data/);
-        assert.equal(graph.edges.filter(edge => edge.from === spare || edge.to === spare).length, 1);
+        assert.equal(graph.edges.filter(edge => edge.from === spare || edge.to === spare).length, 0);
     }
     assert.equal(graph.edges.filter(edge => graph.nodes.get(edge.from).type.startsWith('Port')).length, 2);
 });
@@ -237,8 +241,111 @@ Component Root
     const peer = portId(graph, 'peer:Peer', 'P');
     const external = portId(graph, 'Root', 'External');
     const delegated = portId(graph, 'a:Device', 'b_c');
-    assert.ok(graph.edges.some(edge => edge.from === connected && edge.to === peer && edge.attributes === '[dir=none]'));
+    assert.ok(graph.edges.some(edge => edge.from === connected && edge.to === peer && edge.attributes.includes('dir=none')));
     assert.ok(graph.edges.some(edge => edge.from === external && edge.to === delegated && edge.attributes.includes('style=dashed')));
+});
+
+test('uses the same port boxes in decomposition and composition while preserving structural edges', t => {
+    const result = generate(t, { 'Main.sysla': `
+Signal Data
+Component Leaf Port Value Input Data
+Component Root
+    Port In Input Data
+    Port Out Output Data
+    Port Bus [Port A] [Port B] Bidirectional Data
+    Port Mount
+    Part Leaf as a
+    Part Leaf as b
+` });
+    assert.equal(result.status, 0, result.stderr);
+    const directory = path.join(result.output, 'Main', 'Root');
+    const decomposition = readGraph(path.join(directory, 'Root_Decomposition.dot'));
+    const composition = readGraph(path.join(directory, 'Root_Composition.dot'));
+    for (const name of ['In', 'Out', 'Bus [A, B]', 'Mount']) {
+        const first = decomposition.nodes.get(portId(decomposition, 'Root', name));
+        const second = composition.nodes.get(portId(composition, 'Root', name));
+        assert.equal(first.type, second.type);
+    }
+    const root = [...decomposition.nodes].find(([, node]) => node.name === 'Root')[0];
+    const parts = [...decomposition.nodes].filter(([, node]) => node.type === 'Instance');
+    assert.deepEqual(decomposition.edges.map(edge => [edge.from, edge.to]).sort(), parts.map(([id]) => [root, id]).sort());
+    assert.equal([...decomposition.nodes.values()].filter(node => node.parent).length, 4);
+    assert.equal([...composition.nodes.values()].filter(node => node.parent).length, 6);
+    assert.equal(composition.edges.length, 0, 'Unconnected ports must not acquire membership or connection edges');
+});
+
+test('draws input, output, bidirectional, and untyped delegations between integrated ports', t => {
+    const result = generate(t, { 'Main.sysla': `
+Signal Data
+Component Leaf
+    Port In Input Data
+    Port Out Output Data
+    Port Bus Bidirectional Data
+    Port Mount
+Component Root
+    Port In Input Data
+    Port Out Output Data
+    Port Bus Bidirectional Data
+    Port Mount
+    Part Leaf as leaf
+    Delegation In - leaf:In
+    Delegation Out - leaf:Out
+    Delegation Bus - leaf:Bus
+    Delegation Mount - leaf:Mount
+` });
+    assert.equal(result.status, 0, result.stderr);
+    const graph = readGraph(path.join(result.output, 'Main', 'Root', 'Root_Composition.dot'));
+    assert.equal(graph.edges.length, 4);
+    for (const [name, outward, direction] of [['In', false, 'forward'], ['Out', true, 'forward'], ['Bus', false, 'both'], ['Mount', false, 'none']]) {
+        const outer = portId(graph, 'Root', name);
+        const inner = portId(graph, 'leaf:Leaf', name);
+        const edge = graph.edges.find(edge => edge.from === (outward ? inner : outer) && edge.to === (outward ? outer : inner));
+        assert.ok(edge, `Missing delegation for ${name}`);
+        assert.match(edge.attributes, /style=dashed/);
+        if (direction === 'forward') {
+            assert.doesNotMatch(edge.attributes, /dir=/);
+        } else {
+            assert.ok(edge.attributes.includes(`dir=${direction}`), edge.attributes);
+        }
+    }
+});
+
+test('draws a connection within one instance exactly once in both composition views', t => {
+    const result = generate(t, { 'Main.sysla': `
+Signal Data
+Component Device
+    Port In Input Data
+    Port Out Output Data
+Component Root
+    Part Device as device
+    Connection device:In - device:Out
+` });
+    assert.equal(result.status, 0, result.stderr);
+    for (const filename of ['Root_Composition.dot', 'Root_Composition_device.dot']) {
+        const graph = readGraph(path.join(result.output, 'Main', 'Root', filename));
+        assertConnections(graph, 'Data', [[['device:Device', 'Out'], ['device:Device', 'In']]]);
+        assert.equal(graph.edges.length, 1);
+        assert.deepEqual([graph.edges[0].from, graph.edges[0].to], [portId(graph, 'device:Device', 'Out'), portId(graph, 'device:Device', 'In')]);
+    }
+});
+
+const graphvizAvailable = spawnSync('dot', ['-V'], { encoding: 'utf8', timeout: 10000 }).status === 0;
+test('Graphviz renders all demo diagrams with valid port references', { skip: !graphvizAvailable }, t => {
+    for (const example of ['Demo1', 'DemoMulti1', 'Computer']) {
+        const files = Object.fromEntries(readdirSync(path.join(demosPath, example))
+            .filter(name => name.endsWith('.sysla'))
+            .map(name => [name, readFileSync(path.join(demosPath, example, name), 'utf8')]));
+        const result = generate(t, files, `${example}.sysla`);
+        assert.equal(result.status, 0, result.stderr);
+        const directory = path.join(result.output, example);
+        for (const filename of readdirSync(directory, { recursive: true }).filter(name => name.endsWith('.dot'))) {
+            const rendered = spawnSync('dot', ['-Tsvg', path.join(directory, filename)], { encoding: 'utf8', timeout: 10000 });
+            assert.ifError(rendered.error);
+            assert.equal(rendered.status, 0, `${filename}: ${rendered.stderr}`);
+            assert.equal(rendered.stderr, '', `${filename}: ${rendered.stderr}`);
+            assert.match(rendered.stdout, /<svg\b/);
+        }
+    }
 });
 
 test('rejects syntax errors in the selected file', t => {

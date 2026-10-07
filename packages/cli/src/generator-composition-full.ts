@@ -1,11 +1,10 @@
-import type { Model, Component, PartPort, PartComponent } from 'sysla-language';
-import { GraphVizGeneratorBase, COLOR_COMPONENT, GraphGenerator } from './graphviz-generator.js';
-import { InternalConnection } from './generator-helpers.js';
+import type { Model, Component, PartPort } from 'sysla-language';
+import { GraphVizGeneratorBase, type GraphGenerator } from './graphviz-generator.js';
+import { Anchor, InternalConnection } from './generator-helpers.js';
 
 export class GeneratorCompositionFull extends GraphVizGeneratorBase implements GraphGenerator {
 
     generate(model: Model, outputDir: string): string[] {
-        this.resetIds();
         return this.generateGraphs(model.components, {
             outputDir,
             getName: component => `${component.name}_Composition`,
@@ -14,7 +13,6 @@ export class GeneratorCompositionFull extends GraphVizGeneratorBase implements G
     }
 
     generateForComponent(component: Component, args: { outputDir: string; model?: Model }): string[] {
-        this.resetIds();
         return this.generateGraphs([component], {
             outputDir: args.outputDir,
             getName: c => `${c.name}_Composition`,
@@ -23,101 +21,62 @@ export class GeneratorCompositionFull extends GraphVizGeneratorBase implements G
     }
 
     private compileComponent(component: Component): string {
-        const id1 = this.getNodeId(component);
-        const name1 = component.name;
-        const type1 = 'Component';
-        
-        let output = 'digraph G\n{\n';
-        
-        // Component node
-        output += `\tnode [shape=box, fillcolor=${COLOR_COMPONENT}, style=filled, label = ${this.createLabel(name1, type1)}]; ${id1};\n`;
-        
-        // Collect delegations with instance context
-        const delegations = this.collectDelegations(component);
-        
-        // Component ports
-        for (const partPort of component.ports) {
-            output += this.renderPortNode(partPort, { showSignal: false, showSignalType: true, indent: '\t' });
-            output += `\t${id1} -> ${this.getPortNodeId(partPort)} [dir=none];\n`;
+        let output = this.beginGraph(`${component.name} — Composition`);
+        if (component.parts.length === 0) {
+            return output + this.renderComponentNode(component) + '}\n';
         }
-        
-        // Parts (instances)
-        for (const partComponent of component.parts) {
-            const id2 = this.getNodeId(partComponent);
-            const name2 = `${partComponent.instance.name}:${partComponent.component.ref?.name || '???'}`;
-            const type2 = 'Instance';
-            
-            output += `\tnode [shape=box, fillcolor=${COLOR_COMPONENT}, style=filled, label = ${this.createLabel(name2, type2)}]; ${id2};\n`;
-            output += `\t${id1} -> ${id2} [dir=none];\n`;
-            
-            // Ports of the parts with instance context
-            const childComponent = partComponent.component.ref;
-            if (childComponent) {
-                for (const childPort of childComponent.ports) {
-                    output += this.renderPortNode(childPort, { instance: partComponent, showSignal: false, showSignalType: true, indent: '\t' });
-                    const portId = this.getPortNodeId(childPort, partComponent);
-                    output += `\t${id2} -> ${portId} [dir=none];\n`;
-                }
+
+        // External inputs feed the parts; external outputs receive their signals.
+        const boundaryNodes = new Map<PartPort, string>();
+        const groups = [
+            { suffix: 'inputs', title: 'External inputs', ports: component.ports.filter(port => port.input), rank: 'source' },
+            { suffix: 'outputs', title: 'External outputs', ports: component.ports.filter(port => port.output), rank: 'sink' },
+            { suffix: 'ports', title: 'External ports', ports: component.ports.filter(port => !port.input && !port.output) }
+        ];
+        for (const group of groups) {
+            if (group.ports.length === 0) {
+                continue;
+            }
+            const nodeId = this.getNodeId(component, group.suffix);
+            output += this.renderPortTable(nodeId, component.name, group.title, group.ports, undefined, true);
+            for (const port of group.ports) {
+                boundaryNodes.set(port, nodeId);
+            }
+            if (group.rank) {
+                output += `    { rank=${group.rank}; ${nodeId}; }\n`;
             }
         }
-        
-        // Connections between the ports of the parts
+
+        for (const part of component.parts) {
+            if (part.component.ref) {
+                output += this.renderComponentNode(part.component.ref, part);
+            }
+        }
         for (const connection of component.connections) {
-            output += this.renderConnection(new InternalConnection(connection), '\t');
+            output += this.renderConnection(new InternalConnection(connection));
         }
-
-        // Delegations
-        for (const [proxyPortName, target] of delegations.entries()) {
-            const proxyPort = component.ports.find(p => p.port.name === proxyPortName);
-            if (proxyPort) {
-                const delegatedPortId = this.getPortNodeId(target.port, target.instance);
-                output += `\t${this.getPortNodeId(proxyPort)} -> ${delegatedPortId} [style=dashed, dir=none, color=black];\n`;
-            }
-        }
-        
-        output += '}\n';
-        return output;
-    }
-
-    private collectDelegations(component: Component): Map<string, { instance: PartComponent; port: PartPort }> {
-        const delegations = new Map<string, { instance: PartComponent; port: PartPort }>();
-        const portCache = new Map<PartComponent, Map<string, PartPort>>();
-
-        const resolveInstance = (ref: any): PartComponent | undefined => {
-            if (!ref) {
-                return undefined;
-            }
-            if ((ref as PartComponent).component) {
-                return ref as PartComponent;
-            }
-            return component.parts.find(part => part.instance.name === ref.name);
-        };
-
-        const resolvePort = (instance?: PartComponent, portName?: string): PartPort | undefined => {
-            if (!instance || !portName) {
-                return undefined;
-            }
-            let cache = portCache.get(instance);
-            if (!cache) {
-                cache = new Map<string, PartPort>();
-                const ports = instance.component.ref?.ports ?? [];
-                for (const p of ports) {
-                    cache.set(p.port.name, p);
-                }
-                portCache.set(instance, cache);
-            }
-            return cache.get(portName);
-        };
 
         for (const delegation of component.delegations) {
-            const proxyPortName = delegation.port1?.ref?.name;
-            const instance = resolveInstance(delegation.components2?.ref);
-            const delegatedPort = resolvePort(instance, delegation.port2?.ref?.name);
-            if (proxyPortName && instance && delegatedPort) {
-                delegations.set(proxyPortName, { instance, port: delegatedPort });
+            const proxyPort = component.ports.find(port => port.port === delegation.port1.ref);
+            const part = component.parts.find(part => part.instance === delegation.components2.ref);
+            const delegatedPort = part?.component.ref?.ports.find(port => port.port === delegation.port2.ref);
+            const boundaryNode = proxyPort && boundaryNodes.get(proxyPort);
+            if (!proxyPort || !part || !delegatedPort || !boundaryNode) {
+                continue;
             }
+            let start = this.getPortEndpoint(boundaryNode, proxyPort, undefined, true);
+            let end = this.getAnchorEndpoint(new Anchor(part, delegatedPort));
+            if (proxyPort.output) {
+                [start, end] = [end, start];
+            }
+            const attributes = ['style=dashed', 'color="#777777"'];
+            if (proxyPort.bidirectional) {
+                attributes.push('dir=both');
+            } else if (!proxyPort.input && !proxyPort.output) {
+                attributes.push('dir=none');
+            }
+            output += `    ${start} -> ${end} [${attributes.join(', ')}];\n`;
         }
-
-        return delegations;
+        return output + '}\n';
     }
 }

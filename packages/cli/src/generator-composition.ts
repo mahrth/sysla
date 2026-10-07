@@ -1,6 +1,6 @@
-import type { Model, Component, PartComponent } from 'sysla-language';
-import { GraphVizGeneratorBase, COLOR_COMPONENT, GraphGenerator } from './graphviz-generator.js';
-import { Anchor, InternalConnection } from './generator-helpers.js';
+import type { Model, Component, PartComponent, PartPort } from 'sysla-language';
+import { GraphVizGeneratorBase, type GraphGenerator } from './graphviz-generator.js';
+import { InternalConnection } from './generator-helpers.js';
 
 export class GeneratorComposition extends GraphVizGeneratorBase implements GraphGenerator {
 
@@ -37,52 +37,25 @@ export class GeneratorComposition extends GraphVizGeneratorBase implements Graph
     }
 
     private compileNeighbors(partComponent: PartComponent, connections: InternalConnection[]): string {
-        const id1 = this.getNodeId(partComponent);
-        const name1 = `${partComponent.instance.name}:${partComponent.component.ref?.name || '???'}`;
-        const type1 = 'Instance';
-        
-        let output = 'digraph G\n{\n';
-        
-        // Central instance
-        output += `    node [shape=box, fillcolor=${COLOR_COMPONENT}, style=filled, label = ${this.createLabel(name1, type1)}]; ${id1};\n`;
-        
-        // Neighbor instances and connections
+        let output = this.beginGraph(`${partComponent.instance.name} : ${partComponent.component.ref?.name} — Connections`);
+        const portsByInstance = new Map<PartComponent, Set<PartPort>>();
         for (const connection of connections) {
-            const id2 = this.getNodeId(connection.anchor2.partComponent);
-            const name2 = `${connection.anchor2.partComponent.instance.name}:${connection.anchor2.partComponent.component.ref?.name || '???'}`;
-            const type2 = 'Instance';
-            
-            output += `    node [shape=box, fillcolor=${COLOR_COMPONENT}, style=filled, label = ${this.createLabel(name2, type2)}]; ${id2};\n`;
-            output += this.compileConnection(connection);
+            for (const anchor of [connection.anchor1, connection.anchor2]) {
+                const ports = portsByInstance.get(anchor.partComponent) ?? new Set<PartPort>();
+                ports.add(anchor.partPort);
+                portsByInstance.set(anchor.partComponent, ports);
+            }
         }
-        
-        output += '}\n';
-        return output;
-    }
-
-    private compileConnection(connection: InternalConnection): string {
-        const hash1 = this.getNodeId(connection.anchor1.partComponent);
-        const hash2 = this.getNodeId(connection.anchor2.partComponent);
-        
-        let output = '';
-        output += this.compilePartPort(hash1, connection.anchor1);
-        output += this.compilePartPort(hash2, connection.anchor2);
-        
-        output += this.renderConnection(connection);
-        
-        return output;
-    }
-
-    private compilePartPort(parentNodeId: string, anchor: Anchor): string {
-        const port = anchor.partPort;
-        const portNode = this.renderPortNode(port, {
-            instance: anchor.partComponent,
-            showSignal: false,
-            showSignalType: true
-        });
-        const portNodeId = this.getPortNodeId(port, anchor.partComponent);
-        
-        return `${portNode}    ${parentNodeId} -> ${portNodeId} [dir=none];\n`;
+        for (const [instance, ports] of portsByInstance) {
+            const component = instance.component.ref;
+            if (component) {
+                output += this.renderComponentNode(component, instance, component.ports.filter(port => ports.has(port)));
+            }
+        }
+        for (const connection of connections) {
+            output += this.renderConnection(connection);
+        }
+        return output + '}\n';
     }
 
     private neighborComponents(component: Component): Map<PartComponent, InternalConnection[]> {
@@ -103,12 +76,14 @@ export class GeneratorComposition extends GraphVizGeneratorBase implements Graph
                 list.push(new InternalConnection(internalConnection.anchor1, internalConnection.anchor2));
                 
                 // Add connection to partComponent2 neighbors (reverse)
-                list = neighbors.get(partComponent2);
-                if (!list) {
-                    list = [];
-                    neighbors.set(partComponent2, list);
+                if (partComponent2 !== partComponent1) {
+                    list = neighbors.get(partComponent2);
+                    if (!list) {
+                        list = [];
+                        neighbors.set(partComponent2, list);
+                    }
+                    list.push(new InternalConnection(internalConnection.anchor2, internalConnection.anchor1));
                 }
-                list.push(new InternalConnection(internalConnection.anchor2, internalConnection.anchor1));
             } catch (error) {
                 console.error(`Warning: Could not resolve connection: ${error}`);
             }
