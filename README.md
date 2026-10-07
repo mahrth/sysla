@@ -13,7 +13,7 @@ Graphviz DOT files and PDFs. Hardware and software use the same modeling
 constructs. Simulation, behavioral modeling, and generation of executable
 software for the modeled systems are not implemented yet.
 
-Jump to: [Quick start](#quick-start) · [Installation](#installation-and-prerequisites) · [Editor](#starting-the-sysla-editor) · [Language](#writing-a-model) · [Diagrams and PDFs](#generating-diagrams-and-pdfs) · [Development](#developing-sysla) · [Troubleshooting](#known-limitations-and-troubleshooting)
+Jump to: [Quick start](#quick-start) · [Installation](#installation-and-prerequisites) · [Editor](#starting-the-sysla-editor) · [Language](#writing-a-model) · [Diagrams and PDFs](#generating-diagrams-and-pdfs) · [Development](#developing-sysla) · [Troubleshooting](#known-limitations-and-troubleshooting) · [Ideas and TODOs](TODO.md)
 
 ## Quick start
 

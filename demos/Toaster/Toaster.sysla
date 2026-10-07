@@ -1,0 +1,167 @@
+// ========== SIGNALS ==========
+Signal Heat
+Signal TouchInput
+Signal DisplayData
+Signal ControlCommand
+Signal HeatingControlSignal
+Signal NotificationData
+Signal WiFiData
+Signal ElectricalPower
+Signal TimerSignal
+
+// ========== EXTERNAL ENTITIES ==========
+
+Component User
+Port Hand Output TouchInput
+Port Eye Input DisplayData
+
+Component Smartphone
+Port WiFi Input WiFiData
+
+Component PowerGrid
+Port Outlet Output ElectricalPower
+
+// ========== MATERIAL COMPONENTS ==========
+
+Component Toast
+Port Surface Input Heat
+
+Component Breadroll  
+Port Surface Input Heat
+
+Component Crumbs
+Port Collection  // Mechanical, no heat
+
+// ========== TOASTER SUBSYSTEMS ==========
+
+Component TouchDisplay
+Port TouchSurface Input TouchInput
+Port Controller Output ControlCommand
+Port Visual Output DisplayData
+
+Component Microcontroller
+Port DisplayInterface Input ControlCommand
+Port SlotHeaterControl Output HeatingControlSignal  // Separate!
+Port GridHeaterControl Output HeatingControlSignal  // Separate!
+Port WiFiControl Output NotificationData
+Port TimerInterface Input TimerSignal
+Port PowerIn Input ElectricalPower
+
+Component HeatingElement
+Port ControlSignal Input HeatingControlSignal
+Port PowerIn Input ElectricalPower
+Port HeatOutput Output Heat
+
+Component Timer
+Port PowerIn Input ElectricalPower
+Port TimeSignal Output TimerSignal
+
+Component WiFiModule
+Port Controller Input NotificationData
+Port Antenna Output WiFiData
+Port PowerIn Input ElectricalPower
+
+Component ToastChamber
+Port HeatInterface Input Heat  
+Port SlotOutput Output Heat    
+
+Component BreadRollAttachment
+Port HeatInterface Input Heat
+Port GridOutput Output Heat    
+
+Component CrumbTray
+Port CrumbCollection  // only mechanical
+
+Component PowerSupply
+Port GridInput Input ElectricalPower
+Port ControllerOut Output ElectricalPower
+Port SlotHeaterOut Output ElectricalPower  // Separate!
+Port GridHeaterOut Output ElectricalPower  // Separate!
+Port TimerOut Output ElectricalPower
+Port WiFiOut Output ElectricalPower
+
+// ========== TOASTER ==========
+
+Component Toaster
+// External Ports - User Interaction
+Port TouchInterface Input TouchInput
+Port DisplayOutput Output DisplayData
+Port PowerInput Input ElectricalPower
+Port NotificationOutput Output WiFiData
+
+// External Ports - Material Interaction
+Port SlotHeat Output Heat
+Port GridHeat Output Heat
+Port CrumbInterface  // Mechanical
+
+// Internal Parts
+Part TouchDisplay as display
+Part Microcontroller as controller
+Part HeatingElement as slotHeater
+Part HeatingElement as gridHeater
+Part Timer as timer
+Part WiFiModule as wifi
+Part ToastChamber as chamber
+Part BreadRollAttachment as rollAttachment
+Part CrumbTray as crumbTray
+Part PowerSupply as power
+
+// Delegations - User Interface
+Delegation TouchInterface - display:TouchSurface
+Delegation DisplayOutput - display:Visual
+Delegation PowerInput - power:GridInput
+Delegation NotificationOutput - wifi:Antenna
+
+// Delegations - Material Interface
+Delegation SlotHeat - chamber:SlotOutput
+Delegation GridHeat - rollAttachment:GridOutput
+Delegation CrumbInterface - crumbTray:CrumbCollection
+
+// Internal Connections - Control
+Connection display:Controller - controller:DisplayInterface
+Connection controller:SlotHeaterControl - slotHeater:ControlSignal
+Connection controller:GridHeaterControl - gridHeater:ControlSignal
+Connection controller:WiFiControl - wifi:Controller
+Connection timer:TimeSignal - controller:TimerInterface
+
+// Internal Connections - Power
+Connection power:ControllerOut - controller:PowerIn
+Connection power:SlotHeaterOut - slotHeater:PowerIn
+Connection power:GridHeaterOut - gridHeater:PowerIn
+Connection power:TimerOut - timer:PowerIn
+Connection power:WiFiOut - wifi:PowerIn
+
+// Internal Connections - Heat Flow
+Connection slotHeater:HeatOutput - chamber:HeatInterface
+Connection gridHeater:HeatOutput - rollAttachment:HeatInterface
+
+// ========== SUPERSYSTEM ==========
+
+Component Supersystem
+// Human & Digital
+Part User as user
+Part Smartphone as smartphone
+
+// Infrastructure
+Part PowerGrid as grid
+
+// System Under Development
+Part Toaster as toaster
+
+// Material
+Part Toast as bread
+Part Breadroll as roll
+Part Crumbs as crumbs
+
+// User Interactions
+Connection user:Hand - toaster:TouchInterface
+Connection toaster:DisplayOutput - user:Eye
+
+// Infrastructure
+Connection grid:Outlet - toaster:PowerInput
+Connection toaster:NotificationOutput - smartphone:WiFi
+
+// Material Interactions
+Connection toaster:SlotHeat - bread:Surface
+Connection toaster:GridHeat - roll:Surface
+Connection crumbs:Collection - toaster:CrumbInterface
