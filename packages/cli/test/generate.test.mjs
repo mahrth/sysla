@@ -505,3 +505,208 @@ test('rejects a selected file with an unsupported extension', t => {
     assert.match(result.stderr, /Please choose a file.*\.sysla/);
     assert.equal(existsSync(result.output), false);
 });
+
+test('renders linked behavior definitions and joins case branches at the next action', t => {
+    const result = generate(t, {
+        'Main.sysla': 'Signal Command [on, off] Component Unit Port P Input Command Event E StateMachine M Function A() Function B(cmd: Command)',
+        'Behavior.sysla': `
+            StateMachine Unit.M Initial Off State On State Off Transition Off -> On on E
+            Function Unit.A Receive Command at P as cmd Case cmd on -> Emit E off -> Emit E Call B(cmd)
+        `
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const directory = path.join(result.output, 'Main', 'Unit');
+    const machine = readFileSync(path.join(directory, 'Unit_StateMachine_M.dot'), 'utf8');
+    const states = new Map([...machine.matchAll(/(ID_\d+) \[label=<<FONT POINT-SIZE="12"><B>(\w+)<\/B><\/FONT><BR\/><FONT POINT-SIZE="9">state<\/FONT>>\];/g)]
+        .map(([, id, name]) => [name, id]));
+    assert.ok(machine.includes(`start -> ${states.get('Off')};`));
+    assert.ok(machine.includes(`${states.get('Off')} -> ${states.get('On')} [label="E"];`));
+    const diagram = readFileSync(path.join(directory, 'Unit_Function_A.dot'), 'utf8');
+    const call = diagram.match(/(\w+) \[shape=box, label="B\(cmd\)"\]/)[1];
+    for (const value of ['on', 'off']) {
+        const action = diagram.match(new RegExp('-> (\\w+) \\[label="' + value + '"\\]'))[1];
+        assert.ok(diagram.includes(action + ' -> ' + call + ';'));
+    }
+    assert.equal(existsSync(path.join(directory, 'Unit_Function_B.dot')), false);
+});
+
+test('shows function start preconditions at the definition and at calls to opaque functions', t => {
+    const result = generate(t, {
+        'Main.sysla': `Signal Data Component Unit Port P Input Data StateMachine M
+            Function Run() requires M.On Function Work(data: Data) requires M.On or M.Off`,
+        'Machine.sysla': 'StateMachine Unit.M Initial On State On State Off',
+        'Run.sysla': 'Function Unit.Run Receive Data at P as data Call Work(data)'
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const dot = readFileSync(path.join(result.output, 'Main', 'Unit', 'Unit_Function_Run.dot'), 'utf8');
+    assert.ok(dot.includes('Unit.Run<BR/><FONT POINT-SIZE="9">requires M.On</FONT>'));
+    assert.ok(dot.includes('label=<Work(data)<BR/><FONT POINT-SIZE="9">requires M.On or M.Off</FONT>'));
+});
+
+test('exports scenario forks, synchronized continuation and ordered text across files', t => {
+    const result = generate(t, {
+        'Main.sysla': 'Component Unit Function act() Component Root Part Unit as a Part Unit as b Scenario Run',
+        'Run.sysla': 'Scenario Root.Run Parallel a.act b.act Join a.act'
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const dir = path.join(result.output, 'Main');
+    const dot = readFileSync(path.join(dir, 'Root', 'Root_Scenario_Run.dot'), 'utf8');
+    const [fork, join] = [...dot.matchAll(/(ID_\d+) \[shape=rect,/g)].map(match => match[1]);
+    const [first, second, last] = [...dot.matchAll(/(ID_\d+) \[label="[ab]\.act"\]/g)].map(match => match[1]);
+    for (const edge of [
+        ['start', fork], [fork, first], [fork, second], [first, join], [second, join], [join, last], [last, 'end']
+    ]) assert.ok(dot.includes(edge.join(' -> ') + ';'));
+    assert.match(readFileSync(path.join(dir, 'Main.txt'), 'utf8'), /Scenario Root\.Run\s+Parallel\s+a\.act\s+b\.act\s+Join\s+a\.act/);
+});
+
+test('exports state functions and joins refined calls before continuing', t => {
+    const result = generate(t, {
+        'Main.sysla': 'Component Unit Function run() Function a() Function b() StateMachine M',
+        'Behavior.sysla': `StateMachine Unit.M Initial Idle State Idle Entry run Do a Exit b
+            Function Unit.run Parallel Call a Call b Join Call a`
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const directory = path.join(result.output, 'Main');
+    const machine = readFileSync(path.join(directory, 'Unit', 'Unit_StateMachine_M.dot'), 'utf8');
+    for (const detail of ['state', 'Entry / run', 'Do / a', 'Exit / b']) {
+        assert.ok(machine.includes(`<FONT POINT-SIZE="9">${detail}</FONT>`));
+    }
+    const diagram = readFileSync(path.join(directory, 'Unit', 'Unit_Function_run.dot'), 'utf8');
+    const [fork, join] = [...diagram.matchAll(/(ID_\d+) \[shape=rect,/g)].map(match => match[1]);
+    const [a, b] = [...diagram.matchAll(/(ID_\d+) \[label="[ab]"\]/g)].map(match => match[1]);
+    const after = diagram.match(/(ID_\d+) \[shape=box, label="a"\]/)[1];
+    for (const [from, to] of [['start', fork], [fork, a], [fork, b], [a, join], [b, join], [join, after]]) {
+        assert.ok(diagram.includes(`${from} -> ${to};`));
+    }
+    const text = readFileSync(path.join(directory, 'Main.txt'), 'utf8');
+    assert.match(text, /State Idle Entry run Do a Exit b/);
+    assert.match(text, /Parallel Call a Call b Join Call a/);
+});
+
+test('renders function and state machine starts at the function final diameter', { skip: !graphvizAvailable }, t => {
+    const result = generate(t, { 'Main.sysla': `
+        Component Unit Function Run() StateMachine M
+        Function Unit.Run
+        StateMachine Unit.M Initial Idle State Idle
+    ` });
+    assert.equal(result.status, 0, result.stderr);
+    function nodeSizes(diagram) {
+        const file = path.join(result.output, 'Main', 'Unit', diagram + '.dot');
+        const rendered = spawnSync('dot', ['-Tplain', file], { encoding: 'utf8' });
+        assert.equal(rendered.status, 0, rendered.stderr);
+        return new Map(rendered.stdout.split('\n').filter(line => line.startsWith('node ')).map(line => {
+            const [, name, , , width, height] = line.split(' ');
+            return [name, [Number(width), Number(height)]];
+        }));
+    }
+    const diagram = nodeSizes('Unit_Function_Run');
+    const final = diagram.get('end');
+    assert.ok(final[0] > 0.16);
+    assert.deepEqual(diagram.get('start'), final);
+    assert.deepEqual(nodeSizes('Unit_StateMachine_M').get('start'), final);
+});
+
+function generateAlarmStage(t, stage) {
+    const dir = path.join(demosPath, 'AlarmSystem', stage);
+    const files = Object.fromEntries(readdirSync(dir).filter(name => name.endsWith('.sysla'))
+        .map(name => [name, readFileSync(path.join(dir, name), 'utf8')]));
+    const result = generate(t, files, 'Supersystem.sysla');
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    return path.join(result.output, 'Supersystem');
+}
+
+test('exports function refinements and the camera query in the decomposition stage', t => {
+    const root = generateAlarmStage(t, 'v02-decomposition');
+    const alarm = path.join(root, 'Supersystem', 'AlarmSystem');
+    assert.ok(existsSync(path.join(alarm, 'AlarmSystem_Function_startWarning.dot')));
+    assert.match(readFileSync(path.join(root, 'Supersystem.txt'), 'utf8'), /Function isReady\(\) returns Boolean query/);
+});
+
+test('exports the guard, event origin and detector loop in the integrated stage', t => {
+    const root = generateAlarmStage(t, 'v04-integrated-behavior');
+    const alarm = path.join(root, 'Supersystem', 'AlarmSystem');
+    assert.match(readFileSync(path.join(alarm, 'AlarmSystem_StateMachine_AlarmBehavior.dot'), 'utf8'),
+        /SwitchOnRequested \[camera\.isReady\(\)\] \/ logStart\(\)/);
+    const origin = 'from detector.MotionDetected';
+    assert.ok(readFileSync(path.join(root, 'Supersystem.txt'), 'utf8').includes('Event AlarmDetected ' + origin));
+    assert.ok(readFileSync(path.join(alarm, 'AlarmSystem_StateMachine_AlarmBehavior.dot'), 'utf8').includes(origin));
+    const dot = readFileSync(path.join(alarm, 'Detector', 'Detector_Function_monitorFrames.dot'), 'utf8');
+    const node = label => dot.split('\n').find(line => line.includes('label="' + label + '"')).trim().split(' ')[0];
+    const target = (id, attributes = '') => dot.match(new RegExp(id + ' -> (ID_\\d+)' + attributes + ';'))[1];
+    const loop = target(node('initializeAverage(firstFrame)'));
+    const receive = target(loop);
+    const decision = node('differenceExceedsThreshold(frame)');
+    assert.equal(target(receive), decision);
+    const emit = node('Emit MotionDetected');
+    assert.equal(target(decision, ' \\[label="true"\\]'), emit);
+    const merge = target(decision, ' \\[label="false"\\]');
+    assert.equal(target(emit), merge);
+    const update = node('updateAverage(frame)');
+    assert.equal(target(merge), update);
+    assert.equal(target(update), loop);
+    assert.doesNotMatch(dot, /shape=doublecircle/);
+});
+
+test('draws the three external functions and four interactions in the functional context stage', t => {
+    const root = generateAlarmStage(t, 'v01-functional-context');
+    const dot = readFileSync(path.join(root, 'Supersystem', 'Supersystem_FunctionalContext_AlarmContext.dot'), 'utf8');
+    const cluster = dot.match(/subgraph cluster_subject \{([^}]*)\}/)[1];
+    assert.equal((cluster.match(/shape=ellipse/g) ?? []).length, 3);
+    assert.doesNotMatch(cluster, /shape=box/);
+    const nodes = new Map([...dot.matchAll(/(ID_\d+) \[shape=(?:ellipse|box), label="([^"]+)"\]/g)]
+        .map(([, id, label]) => [label, id]));
+    const edges = [...dot.matchAll(/(ID_\d+) -> (ID_\d+) \[dir=(\w+)\]/g)].map(m => m.slice(1));
+    assert.deepEqual(edges, [
+        [nodes.get('user : User'), nodes.get('monitorEnvironment'), 'both'],
+        [nodes.get('environment : MonitoredEnvironment'), nodes.get('monitorEnvironment'), 'forward'],
+        [nodes.get('user : User'), nodes.get('resetAlarm'), 'forward'],
+        [nodes.get('user : User'), nodes.get('setDetectionSensitivity'), 'forward']
+    ]);
+    const expectedContext = [
+        'FunctionalContext Supersystem.AlarmContext for alarm',
+        '    user <-> monitorEnvironment',
+        '    environment -> monitorEnvironment',
+        '    user -> resetAlarm',
+        '    user -> setDetectionSensitivity'
+    ].join('\n');
+    assert.ok(readFileSync(path.join(root, 'Supersystem.txt'), 'utf8').includes(expectedContext));
+});
+
+test('mirrors model folders under the source root without mixing variants', t => {
+    const cwd = mkdtempSync(path.join(tmpdir(), 'sysla-variants-'));
+    t.after(() => rmSync(cwd, { recursive: true, force: true }));
+    function run(file, ...options) {
+        const result = spawnSync(process.execPath, [cliPath, 'generate', file, ...options], { cwd, encoding: 'utf8' });
+        assert.ifError(result.error);
+        return result;
+    }
+
+    for (const [variant, signal] of [['v01-context', 'First'], ['v02-decomposition', 'Second']]) {
+        const dir = path.join('demos', 'AlarmSystem', variant);
+        mkdirSync(path.join(cwd, dir), { recursive: true });
+        writeFileSync(path.join(cwd, dir, 'Supersystem.sysla'), 'Component Supersystem');
+        writeFileSync(path.join(cwd, dir, 'Signals.sysla'), 'Signal ' + signal);
+        const result = run(path.join(dir, 'Supersystem.sysla'), '--source-root', 'demos');
+        assert.equal(result.status, 0, result.stderr);
+    }
+    for (const [variant, signal] of [['v01-context', 'First'], ['v02-decomposition', 'Second']]) {
+        const dir = path.join(cwd, 'generated', 'AlarmSystem', variant);
+        assert.ok(readFileSync(path.join(dir, 'Supersystem.txt'), 'utf8').includes('Signal: ' + signal));
+        assert.ok(existsSync(path.join(dir, 'Supersystem', 'Supersystem_Decomposition.dot')));
+    }
+
+    const first = path.join(cwd, 'demos', 'AlarmSystem', 'v01-context');
+    const file = path.join(first, 'Signals.sysla');
+    const companion = run(file, '--source-root', path.join(cwd, 'demos'));
+    assert.equal(companion.status, 0, companion.stderr);
+    assert.ok(existsSync(path.join(cwd, 'generated/AlarmSystem/v01-context/Signals.txt')));
+    const direct = run(file, '--source-root', first, '-d', 'diagrams');
+    assert.equal(direct.status, 0, direct.stderr);
+    assert.ok(existsSync(path.join(cwd, 'diagrams', 'Signals.txt')));
+
+    const outside = run(file, '--source-root', 'diagrams', '-d', 'invalid');
+    assert.equal(outside.status, 1);
+    assert.match(outside.stderr, /outside source root/);
+    assert.equal(existsSync(path.join(cwd, 'invalid')), false);
+});

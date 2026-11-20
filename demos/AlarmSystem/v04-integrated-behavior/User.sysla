@@ -1,0 +1,16 @@
+Component User
+    Port ResetPress Output ResetCommand
+    Port SwitchMovement Output OperatingCommand
+    Port Ear Input WarningTone
+    Port Eyes Input WarningLight
+
+    Function perceiveAlarm()
+    Function hearSiren()
+    Function seeWarningLight()
+    Function reset()
+
+Function User.perceiveAlarm
+    Parallel
+        Call hearSiren
+        Call seeWarningLight
+    Join

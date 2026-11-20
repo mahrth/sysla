@@ -1,0 +1,3 @@
+Component Siren
+    Port ControlInput_12V Input WarningCommand
+    Port SoundOutlet Output WarningTone

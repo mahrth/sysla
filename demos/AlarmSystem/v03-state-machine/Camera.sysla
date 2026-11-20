@@ -1,0 +1,5 @@
+Component Camera
+    Port Lens Input EnvironmentalLight
+    Port USB Output ImageFrame
+
+    Function isReady() returns Boolean query

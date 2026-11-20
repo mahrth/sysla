@@ -1,0 +1,12 @@
+Component AlarmSystem
+    Port Camera Input EnvironmentalLight
+    Port ResetButton Input ResetCommand
+    Port OperatingSwitch Input OperatingCommand
+    Port Siren Output WarningTone
+    Port Lamp Output WarningLight
+
+    Function resetAlarm()
+    Function setDetectionSensitivity()
+    Function monitorEnvironment()
+    Function startWarning()
+    Function stopWarning()

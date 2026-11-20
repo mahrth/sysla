@@ -45,9 +45,17 @@ export class GraphVizGeneratorBase {
         return nodeId;
     }
 
-    protected beginGraph(title: string): string {
+    protected detailLine(text: string): string {
+        return `<BR/><FONT POINT-SIZE="9">${this.escapeHtml(text)}</FONT>`;
+    }
+
+    protected labelWithDetail(text: string, detail?: string): string {
+        return detail ? `<${this.escapeHtml(text)}${this.detailLine(detail)}>` : JSON.stringify(text);
+    }
+
+    protected beginGraph(title: string, subtitle?: string): string {
         return 'digraph G\n{\n'
-            + `    graph [rankdir=LR, nodesep=0.45, ranksep=1.0, splines=spline, pad=0.3, fontname="DejaVu Sans", fontsize=18, labelloc=t, label=${JSON.stringify(title)}];\n`
+            + `    graph [rankdir=LR, nodesep=0.45, ranksep=1.0, splines=spline, pad=0.3, fontname="DejaVu Sans", fontsize=18, labelloc=t, label=${this.labelWithDetail(title, subtitle)}];\n`
             + '    node [shape=plain, fontname="DejaVu Sans"];\n'
             + '    edge [fontname="DejaVu Sans", fontsize=9, arrowsize=0.65, penwidth=1.2];\n';
     }

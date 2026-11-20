@@ -1,0 +1,65 @@
+Signal ImageFrame
+Signal WarningCommand [on, off]
+
+Component AlarmSystem
+    Port Camera Input EnvironmentalLight
+    Port ResetButton Input ResetCommand
+    Port OperatingSwitch Input OperatingCommand
+    Port Siren Output WarningTone
+    Port Lamp Output WarningLight
+
+    Part Camera as camera
+    Part WarningLamp as lamp
+    Part Siren as siren
+    Part Detector as detector
+
+    Delegation Camera - camera:Lens
+    Delegation OperatingSwitch - detector:OperatingInput
+    Delegation ResetButton - detector:ResetInput
+    Delegation Siren - siren:SoundOutlet
+    Delegation Lamp - lamp:LightOutlet
+
+    Connection camera:USB - detector:USB
+    Connection detector:SirenControl_12V - siren:ControlInput_12V
+    Connection detector:LampControl_12V - lamp:ControlInput_12V
+
+    Event AlarmDetected
+    Event SwitchOnRequested
+    Event SwitchOffRequested
+
+    StateMachine AlarmBehavior
+
+    Function resetAlarm()
+    Function setDetectionSensitivity()
+    Function monitorEnvironment()
+
+    Function startWarning()
+    Function stopWarning()
+    Function sirenOn()        // Sets detector:SirenControl_12V to on.
+    Function warningLampOn()  // Sets detector:LampControl_12V to on.
+    Function sirenOff()       // Sets detector:SirenControl_12V to off.
+    Function warningLampOff() // Sets detector:LampControl_12V to off.
+
+Function AlarmSystem.startWarning
+    Parallel
+        Call sirenOn
+        Call warningLampOn
+    Join
+
+Function AlarmSystem.stopWarning
+    Parallel
+        Call sirenOff
+        Call warningLampOff
+    Join
+
+StateMachine AlarmSystem.AlarmBehavior
+    Initial Off
+    State Off
+    State Normal
+    State Alarm
+
+    Transition Off -> Normal on SwitchOnRequested
+    Transition Normal -> Alarm on AlarmDetected
+    Transition Alarm -> Normal on ResetCommand
+    Transition Normal -> Off on SwitchOffRequested
+    Transition Alarm -> Off on SwitchOffRequested

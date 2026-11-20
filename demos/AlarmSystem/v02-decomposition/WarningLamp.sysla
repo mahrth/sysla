@@ -1,0 +1,3 @@
+Component WarningLamp
+    Port ControlInput_12V Input WarningCommand
+    Port LightOutlet Output WarningLight

@@ -31,6 +31,7 @@
         "clean": "node ../../scripts/workspace-files.mjs clean syntaxes",
         "vscode:prepublish": "npm run build",
         "build:prepare": "node ../../scripts/workspace-files.mjs prepare-extension",
+        "test": "node --test test/*.test.mjs",
         "build": "npm run build:prepare && tsc -b tsconfig.json && node esbuild.mjs",
         "build:clean": "npm run clean && npm run build",
         "watch": "npm run build:prepare && concurrently -n tsc,esbuild -c blue,yellow \"tsc -b tsconfig.json --watch\" \"node esbuild.mjs --watch\""

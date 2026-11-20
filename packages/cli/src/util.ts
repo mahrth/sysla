@@ -101,15 +101,20 @@ async function loadDocument(fileName: string, services: LangiumCoreServices): Pr
     return document;
 }
 
-interface FilePathData {
-    destination: string,
-    name: string
-}
+export function extractDestinationAndName(filePath: string, destination = 'generated', sourceRoot?: string) {
+    const name = path.basename(filePath, path.extname(filePath)).replace(/[.-]/g, '');
+    if (sourceRoot === undefined) {
+        return { outputDir: path.join(destination, name), name };
+    }
 
-export function extractDestinationAndName(filePath: string, destination: string | undefined): FilePathData {
-    filePath = path.basename(filePath, path.extname(filePath)).replace(/[.-]/g, '');
-    return {
-        destination: destination ?? path.join(path.dirname(filePath), 'generated'),
-        name: path.basename(filePath)
-    };
+    if (!fs.statSync(sourceRoot, { throwIfNoEntry: false })?.isDirectory()) {
+        console.error(chalk.red(`Source root is not a directory: ${sourceRoot}`));
+        process.exit(1);
+    }
+    const relativeDir = path.relative(sourceRoot, path.dirname(filePath));
+    if (relativeDir === '..' || relativeDir.startsWith(`..${path.sep}`) || path.isAbsolute(relativeDir)) {
+        console.error(chalk.red(`Model file ${filePath} is outside source root ${sourceRoot}.`));
+        process.exit(1);
+    }
+    return { outputDir: path.join(destination, relativeDir), name };
 }

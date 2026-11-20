@@ -1,4 +1,4 @@
-import type { Model, Component, PartPort } from 'sysla-language';
+import type { Model, Component, PartPort, ScenarioAction } from 'sysla-language';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -20,6 +20,32 @@ export class GeneratorText {
             output += '\n';
         }
         
+        // Preserve the modeled order and nesting of state actions and function steps.
+        for (const definition of [...model.machines, ...model.functions]) {
+            if (definition.$cstNode) output += `${definition.$cstNode.text}\n\n`;
+        }
+        for (const view of model.contexts) {
+            output += `FunctionalContext ${view.owner.$refText}.${view.name} for ${view.subject.$refText}\n`;
+            for (const interaction of view.interactions) {
+                output += `    ${interaction.neighbor.$refText} ${interaction.direction} ${interaction.operation.$refText}\n`;
+            }
+            output += '\n';
+        }
+        const actionName = (action: ScenarioAction) => `${action.part.$refText}.${action.callee.$refText}`;
+        for (const scenario of model.scenarios) {
+            output += `Scenario ${scenario.owner.$refText}.${scenario.declaration.$refText}\n`;
+            for (const step of scenario.steps) {
+                if (step.$type === 'ScenarioAction') {
+                    output += `    ${actionName(step)}\n`;
+                } else {
+                    output += '    Parallel\n';
+                    for (const action of step.actions) output += `        ${actionName(action)}\n`;
+                    output += '    Join\n';
+                }
+            }
+            output += '\n';
+        }
+
         if (!fs.existsSync(outputDir)) {
             fs.mkdirSync(outputDir, { recursive: true });
         }
@@ -31,6 +57,14 @@ export class GeneratorText {
     private generateComponent(component: Component): string {
         let output = `\nComponent: ${component.name}\n`;
         
+        for (const event of component.events) {
+            const origin = event.part && event.source ? ` from ${event.part.$refText}.${event.source.$refText}` : '';
+            output += `  Event ${event.name}${origin}\n`;
+        }
+        for (const operation of component.functions) {
+            output += `  ${operation.$cstNode?.text ?? operation.name}\n`;
+        }
+
         // Ports
         if (component.ports.length > 0) {
             output += '  Ports:\n';

@@ -1,0 +1,4 @@
+Component MonitoredEnvironment
+    Port EnvironmentalObjects Output EnvironmentalLight
+
+    Function startMovement()

@@ -216,7 +216,7 @@ The implementation is in [sysla-validator.ts](packages/language/src/sysla-valida
 
 The CLI automatically loads all `.sysla` files directly in the directory of the specified file. No `import` statements are needed. This CLI loading mechanism does not search subdirectories recursively.
 
-Keep related definitions in one folder and independent models in separate folders. The selected file determines the output folder name; all models in the same directory are processed. See [demos/DemoMulti1](demos/DemoMulti1) for a complete example.
+Keep related definitions in one folder and independent models in separate folders. By default, the selected file determines the output folder name; all models in the same directory are processed. See [demos/DemoMulti1](demos/DemoMulti1) for a complete example.
 
 ## Generating diagrams and PDFs
 
@@ -279,7 +279,37 @@ npm run gen -- /path/MyModel.sysla -d /path/diagrams
 
 The results are written to `/path/diagrams/MyModel/`.
 
+### Generating diagrams for model variants
+
+If two variants both use `Supersystem.sysla` as their entry file, the default
+command writes both to `generated/Supersystem/`. Use `--source-root <dir>`
+to give each variant its own output folder. The CLI takes the model folder's
+path relative to the source root and appends it to the output directory.
+
+For example, given the following layout, run these commands from the repository root.
+
+```bash
+npm run gen -- demos/AlarmSystem/v01-functional-context/Supersystem.sysla --source-root demos
+npm run gen -- demos/AlarmSystem/v02-decomposition/Supersystem.sysla --source-root demos
+```
+
+| Model folder | Output folder |
+| --- | --- |
+| `demos/AlarmSystem/v01-functional-context/` | `generated/AlarmSystem/v01-functional-context/` |
+| `demos/AlarmSystem/v02-decomposition/` | `generated/AlarmSystem/v02-decomposition/` |
+
+Each output folder contains its own `Supersystem.txt`, component diagrams and
+`gen-pdfs.sh`. Choosing another entry file in the same model folder keeps the
+same output folder and names the text summary after that file.
+
+Combine `--source-root demos` with `-d diagrams` to write the second variant to
+`diagrams/AlarmSystem/v02-decomposition/`. The selected model folder must be
+inside the source root or equal to it. In the latter case the CLI writes
+directly into the output directory.
+
 ## Examples and local models
+
+The [alarm system tutorial](demos/AlarmSystem/README.md) builds a model in four stages, from the functional context to integrated behavior.
 
 | Example                                         | Purpose                                                           |
 | ----------------------------------------------- | ----------------------------------------------------------------- |

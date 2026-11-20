@@ -1,0 +1,31 @@
+Signal EnvironmentalLight
+Signal ResetCommand as Event
+Signal OperatingCommand [on, off]
+Signal WarningTone
+Signal WarningLight
+
+Component Supersystem
+    Part AlarmSystem as alarm
+    Part MonitoredEnvironment as environment
+    Part User as user
+
+    Connection environment:EnvironmentalObjects - alarm:Camera
+    Connection user:ResetPress - alarm:ResetButton
+    Connection user:SwitchMovement - alarm:OperatingSwitch
+    Connection alarm:Siren - user:Ear
+    Connection alarm:Lamp - user:Eyes
+
+    Scenario MotionAlarmAndReset
+
+Scenario Supersystem.MotionAlarmAndReset
+    environment.startMovement
+    alarm.startWarning
+    user.perceiveAlarm
+    user.reset
+    alarm.stopWarning
+
+FunctionalContext Supersystem.AlarmContext for alarm
+    user <-> monitorEnvironment
+    environment -> monitorEnvironment
+    user -> resetAlarm
+    user -> setDetectionSensitivity

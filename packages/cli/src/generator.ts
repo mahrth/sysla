@@ -3,6 +3,8 @@ import type { LangiumCoreServices } from 'langium';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { extractDestinationAndName } from './util.js';
+import { GeneratorFunctionalContext } from './generator-functional-context.js';
+import { GeneratorBehavior } from './generator-behavior.js';
 import { GeneratorText } from './generator-text.js';
 import { GeneratorDecomposition } from './generator-decomposition.js';
 import { GeneratorComposition } from './generator-composition.js';
@@ -13,10 +15,10 @@ export function generateJavaScript(
     model: Model, 
     filePath: string, 
     destination: string | undefined,
-    services?: LangiumCoreServices
+    services?: LangiumCoreServices,
+    sourceRoot?: string
 ): string {
-    const data = extractDestinationAndName(filePath, destination);
-    const baseOutputDir = path.join(data.destination, data.name);
+    const { outputDir: baseOutputDir, name } = extractDestinationAndName(filePath, destination, sourceRoot);
     
     if (!fs.existsSync(baseOutputDir)) {
         fs.mkdirSync(baseOutputDir, { recursive: true });
@@ -33,7 +35,7 @@ export function generateJavaScript(
     
     // 1. Text generator (at the root) - now with all components/signals
     const generatorText = new GeneratorText();
-    const textFile = generatorText.generate(mergedView, baseOutputDir, data.name);
+    const textFile = generatorText.generate(mergedView, baseOutputDir, name);
     results.push(`Text: ${textFile}`);
     
     // 2. Find root components (those not used as parts)
@@ -51,7 +53,9 @@ export function generateJavaScript(
     const generators: GraphGenerator[] = [
         new GeneratorDecomposition(),
         new GeneratorCompositionFull(),
-        new GeneratorComposition()
+        new GeneratorComposition(),
+        new GeneratorBehavior(),
+        new GeneratorFunctionalContext()
     ];
 
     // 3. Generate hierarchical diagrams only for root components
@@ -104,21 +108,15 @@ function getAllModelsFromWorkspace(services: LangiumCoreServices): Model[] {
  * Create a merged view of all models (all components and signals)
  */
 function createMergedModelView(models: Model[]): Model {
-    const allComponents: Component[] = [];
-    const allSignals: any[] = [];
-    
-    for (const model of models) {
-        allComponents.push(...model.components);
-        allSignals.push(...model.signals);
-    }
-    
-    // Return a view that aggregates all components/signals
     return {
         $type: 'Model',
-        components: allComponents,
-        signals: allSignals,
-        imports: []
-    } as Model;
+        components: models.flatMap(model => model.components),
+        signals: models.flatMap(model => model.signals),
+        machines: models.flatMap(model => model.machines),
+        functions: models.flatMap(model => model.functions),
+        scenarios: models.flatMap(model => model.scenarios),
+        contexts: models.flatMap(model => model.contexts)
+    };
 }
 
 function generateComponentHierarchically(

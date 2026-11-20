@@ -1,7 +1,9 @@
 import type { ValidationAcceptor, ValidationChecks } from 'langium';
-import type { SyslaAstType, Component, Connection, Delegation, PartPort, Instance } from './generated/ast.js';
+import type { SyslaAstType, Component, Connection, Delegation, PartPort, Instance, Call, QueryInvocation, StateAction, ScenarioAction } from './generated/ast.js';
 import type { SyslaServices } from './sysla-module.js';
-import { AstUtils } from 'langium';
+import { visibleBindings } from './sysla-scope-provider.js';
+import { isCall, isReceive } from './generated/ast.js';
+import { type AstNode, AstUtils } from 'langium';
 
 /**
  * Register custom validation checks.
@@ -11,10 +13,94 @@ export function registerValidationChecks(services: SyslaServices) {
     const validator = services.validation.SyslaValidator;
     const checks: ValidationChecks<SyslaAstType> = {
         Component: [
-            //validator.checkKomponenteStartsWithCapital,
+            (component, accept) => {
+                checkUniqueNames(component.functions, accept);
+                checkUniqueNames(component.scenarios, accept);
+                checkUniqueNames(component.machines, accept);
+                const triggers = new Set(component.ports.flatMap(port =>
+                    (port.input || port.bidirectional) && port.signal?.ref?.event ? [port.signal.ref.name] : []
+                ));
+                checkUniqueNames(component.events, accept, triggers);
+            },
             validator.checkMehrfachverbindungen
         ],
-        //Signal: validator.checkSignal,
+        Signal: (signal, accept) => checkUniqueNames(signal.values, accept),
+        State: (state, accept) => {
+            const kinds = new Set<string>();
+            for (const action of state.actions) {
+                if (kinds.has(action.kind)) {
+                    accept('error', `Duplicate ${action.kind} function.`, { node: action, property: 'kind' });
+                }
+                kinds.add(action.kind);
+            }
+        },
+        MachineDefinition: (machine, accept) => checkUniqueNames(machine.states, accept),
+        Guard: (guard, accept) => {
+            const operation = guard.operation.ref;
+            if (operation && !(operation.query && operation.result?.boolean && !operation.parameters.length)) {
+                accept('error', 'A guard requires a parameterless Boolean query.', { node: guard, property: 'operation' });
+            }
+        },
+        StateAction: checkImplicitCall,
+        ScenarioAction: checkImplicitCall,
+        Call: checkArguments,
+        Loop: (loop, accept) => {
+            const next = loop.$container.steps[(loop.$containerIndex ?? 0) + 1];
+            if (next) accept('error', 'This step is unreachable after an unconditional loop.', { node: next });
+        },
+        QueryInvocation: (query, accept) => {
+            const operation = query.callee.ref;
+            if (operation && !(operation.query && operation.result?.boolean)) {
+                accept('error', 'If requires a Boolean query.', { node: query, property: 'callee' });
+            }
+            checkArguments(query, accept);
+        },
+        Emit: (emit, accept) => {
+            if (emit.event.ref?.part) {
+                accept('error', 'This event is bound to a part and cannot be emitted locally.', { node: emit, property: 'event' });
+            }
+        },
+        Receive: (receive, accept) => {
+            if (visibleBindings(receive).some(binding => binding.name === receive.name)) {
+                accept('error', `Duplicate name '${receive.name}'.`, { node: receive, property: 'name' });
+            }
+        },
+        FunctionDeclaration: (declaration, accept) => {
+            checkUniqueNames(declaration.parameters, accept);
+            if (declaration.query && !declaration.result) {
+                accept('error', 'A query must declare its return type.', { node: declaration, property: 'name' });
+            }
+            const seen = new Set<string>();
+            for (const requirement of declaration.requirements) {
+                if (requirement.machine.$refText !== declaration.requirements[0].machine.$refText) {
+                    accept('error', 'All alternatives must refer to the same state machine.', { node: requirement, property: 'machine' });
+                } else if (seen.has(requirement.state.$refText)) {
+                    accept('error', 'Duplicate state in function precondition.', { node: requirement, property: 'state' });
+                }
+                seen.add(requirement.state.$refText);
+            }
+        },
+        FunctionDefinition: (definition, accept) => {
+            const operation = definition.declaration.ref;
+            if (!operation) return;
+            if (operation.query) {
+                for (const step of AstUtils.streamAllContents(definition)) {
+                    if (step.$type === 'Receive' || step.$type === 'Emit' || (isCall(step) && !step.callee.ref?.query)) {
+                        accept('error', 'Queries may not receive signals, emit events or call non-query functions.', { node: step });
+                    }
+                }
+            }
+        },
+        Choice: (choice, accept) => {
+            const seen = new Set<string>();
+            for (const branch of choice.branches) {
+                const value = branch.value.$refText;
+                if (seen.has(value)) {
+                    accept('error', `Duplicate case value '${value}'.`, { node: branch, property: 'value' });
+                }
+                seen.add(value);
+            }
+        },
         Connection: [
             validator.checkVerbindungSignalKompatibilitaet,
             validator.checkVerbindungRichtung
@@ -249,4 +335,39 @@ export class SyslaValidator {
         return komponente.ports.find((bp: PartPort) => bp.port.name === port.name);
     }
 
+}
+
+function checkUniqueNames(nodes: Array<AstNode & { name: string }>, accept: ValidationAcceptor, seen = new Set<string>()): void {
+    for (const node of nodes) {
+        if (seen.has(node.name)) {
+            accept('error', `Duplicate name '${node.name}'.`, { node, property: 'name' });
+        }
+        seen.add(node.name);
+    }
+}
+
+function checkImplicitCall(action: StateAction | ScenarioAction, accept: ValidationAcceptor): void {
+    if (action.callee.ref?.parameters.length) {
+        accept('error', 'This invocation requires a parameterless function.', { node: action, property: 'callee' });
+    }
+}
+
+function checkArguments(call: Call | QueryInvocation, accept: ValidationAcceptor): void {
+    const operation = call.callee.ref;
+    if (!operation) return;
+    const args = call.argument ? [call.argument, ...call.additionalArguments] : [];
+    if (args.length !== operation.parameters.length) {
+        accept('error', `Expected ${operation.parameters.length} arguments.`, { node: call, property: 'callee' });
+        return;
+    }
+    args.forEach((arg, index) => {
+        const binding = arg.ref;
+        if (!binding) return;
+        const expected = operation.parameters[index].valueType;
+        const actual = isReceive(binding) ? binding.signal.ref : binding.valueType.signal?.ref;
+        const actualBoolean = !isReceive(binding) && binding.valueType.boolean;
+        if (actualBoolean !== expected.boolean || actual !== expected.signal?.ref) {
+            accept('error', 'Argument type does not match parameter.', { node: call, property: 'callee' });
+        }
+    });
 }

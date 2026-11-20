@@ -19,12 +19,13 @@ export const generateAction = async (fileName: string, opts: GenerateOptions): P
     // Automatically load all .sysla files in the same directory
     const model = await extractAstNodeWithDirectory<Model>(fileName, services);
     
-    const generatedFilePath = generateJavaScript(model, fileName, opts.destination, services);
+    const generatedFilePath = generateJavaScript(model, fileName, opts.destination, services, opts.sourceRoot);
     console.log(chalk.green(`Model artifacts generated successfully:\n${generatedFilePath}`));
 };
 
 export type GenerateOptions = {
     destination?: string;
+    sourceRoot?: string;
 }
 
 export default function(): void {
@@ -37,6 +38,7 @@ export default function(): void {
         .command('generate')
         .argument('<file>', `source file (possible file extensions: ${fileExtensions})`)
         .option('-d, --destination <dir>', 'destination directory of generating')
+        .option('--source-root <dir>', 'mirror the model directory relative to this root in the output directory')
         .description('generates diagrams for SysLa architecture models')
         .action(generateAction);
 
