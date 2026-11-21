@@ -11,17 +11,16 @@ Component Detector
     Function initializeAverage(frame: ImageFrame)
     Function differenceExceedsThreshold(frame: ImageFrame) returns Boolean query
     Function updateAverage(frame: ImageFrame)
+    Function compareWithAverage(frame: ImageFrame)
 
-// Detection rule: emit MotionDetected for each frame whose difference from the running average exceeds the threshold.
 Function Detector.monitorFrames
     Receive ImageFrame at USB as firstFrame
     Call initializeAverage(firstFrame)
-
     Loop
         Receive ImageFrame at USB as frame
-        // Compare this frame with the running average of earlier frames.
-        If differenceExceedsThreshold(frame)
-            Emit MotionDetected
-        EndIf
+            Call compareWithAverage(frame)
+            If differenceExceedsThreshold(frame)
+                Emit MotionDetected
+            EndIf
         Call updateAverage(frame)
     EndLoop
